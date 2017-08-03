@@ -1,5 +1,5 @@
-module GlobalState (GlobalState, GlobalKey(..), GlobalStore
-                   , getGlobal, setGlobal
+module GlobalState ( GlobalState, GlobalKey(..), GlobalStore
+                   , getGlobal, setGlobal, empty, runState
                    ) where
 
 import Data.Dynamic
