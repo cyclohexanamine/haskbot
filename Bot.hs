@@ -8,6 +8,7 @@ import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..)
            , joinMsg, readMsg )
 import GlobalState ( GlobalState, GlobalKey(..), GlobalStore
                    , getGlobal, setGlobal, empty, runState )
+import Scripting ( CallbackClass(..), callbacks )
 
 
 -- Config
@@ -20,13 +21,17 @@ c_nick   = "voteplus"
 
 -- Logic
 findCallbacks :: SMsg -> [GlobalState (Maybe CMsg)]
-findCallbacks msg = case msg of
-    SPing srv -> [return $ Just (CMsg PONG [srv])]
-    SNumeric _ 376 _ -> [return $ Just (CMsg JOIN [c_chan])]
-    SPrivmsg (SUser nick _ _) (RChannel _) _ -> if nick /= c_nick
-                                                  then [return $ respondToChanMsg msg]
-                                                  else [return Nothing]
-    _ -> [return Nothing]
+findCallbacks msg = 
+    let cClassM = case msg of
+            SPing _ -> Just Ping
+            SNumeric _ a _ -> Just $ Numeric a
+            SPrivmsg (SUser nick _ _) (RChannel _) _ -> if nick /= c_nick
+                                                          then Just UserMsg
+                                                          else Nothing
+            _ -> Nothing
+     in case cClassM of 
+            Nothing -> [return Nothing]
+            Just cClass -> [ cb msg | (cls, cb) <- callbacks, cls == cClass]
     
 respondToChanMsg :: SMsg -> Maybe CMsg
 respondToChanMsg (SPrivmsg (SUser nick _ _) ch text)
