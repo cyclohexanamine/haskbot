@@ -17,7 +17,7 @@ callbacks = [ respondToPing
             ]
 
 respondToChanMsg :: SMsg -> GlobalState (Maybe CMsg)
-respondToChanMsg (SPrivmsg (SUser nick _ _) ch text)
+respondToChanMsg (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
     do count <- getGlobal testCounter
        setGlobal testCounter (count+1)
        return $ Just (CMsg PRIVMSG [show ch, "Echoing: " ++ text ++ " - " ++ show (count+1)])
