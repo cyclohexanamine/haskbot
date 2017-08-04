@@ -5,8 +5,6 @@ import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..)
 import GlobalState ( GlobalState, GlobalKey(..), GlobalStore
                    , getGlobal, setGlobal, empty, runState )
 
-data CallbackClass = SrvMsg | UserMsg | Ping | Numeric Int deriving Eq
-
 testCounter = GlobalKey (0::Int) "testCounter"
 
 

@@ -10,7 +10,7 @@ import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..)
            , joinMsg, readMsg )
 import GlobalState ( GlobalState, GlobalKey(..), GlobalStore
                    , getGlobal, setGlobal, empty, runState )
-import Scripting ( CallbackClass(..), callbacks )
+import Scripting ( callbacks )
 
 
 -- Config
