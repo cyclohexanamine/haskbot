@@ -3,6 +3,8 @@ import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine)
 import Text.Printf (hPrintf)
 import Control.Monad (liftM, mapM_)
 import Data.Maybe (catMaybes)
+import Control.Exception (PatternMatchFail, evaluate, try)
+import System.IO.Unsafe (unsafePerformIO)
 
 import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..)
            , joinMsg, readMsg )
@@ -19,20 +21,17 @@ c_chan   = "#votebot-testing"
 c_nick   = "voteplus"
 
 
--- Logic
+-- Applying callbacks
+
+tryApply :: (a -> b) -> a -> Maybe b
+tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
+                Left err -> Nothing
+                Right r -> Just r
+               where tryMatch = try :: IO a -> IO (Either PatternMatchFail a)
+
 findCallbacks :: SMsg -> [GlobalState (Maybe CMsg)]
-findCallbacks msg = 
-    let cClassM = case msg of
-            SPing _ -> Just Ping
-            SNumeric _ a _ -> Just $ Numeric a
-            SPrivmsg (SUser nick _ _) (RChannel _) _ -> if nick /= c_nick
-                                                          then Just UserMsg
-                                                          else Nothing
-            _ -> Nothing
-     in case cClassM of 
-            Nothing -> [return Nothing]
-            Just cClass -> [ cb msg | (cls, cb) <- callbacks, cls == cClass]
-    
+findCallbacks msg = catMaybes . map ($msg) $ map tryApply callbacks
+
 respondToChanMsg :: SMsg -> Maybe CMsg
 respondToChanMsg (SPrivmsg (SUser nick _ _) ch text)
     | nick /= "nyaffles" = Nothing
@@ -40,7 +39,7 @@ respondToChanMsg (SPrivmsg (SUser nick _ _) ch text)
 
 respond :: SMsg -> GlobalState [CMsg]
 respond msg = liftM catMaybes . sequence $ cb
-    where cb = findCallbacks msg 
+    where cb = findCallbacks msg
 
 
 -- Message handling
@@ -64,7 +63,7 @@ main = do
     writeMsg h . CMsg NICK $ [c_nick]
     writeMsg h . CMsg USER $ [c_nick, "0", "*" , c_nick]
     listen h empty
-    
+
 listen :: Handle -> GlobalStore -> IO ()
 listen h st = do s <- hGetLine h
                  putStrLn s

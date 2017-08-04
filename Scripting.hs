@@ -7,15 +7,26 @@ import GlobalState ( GlobalState, GlobalKey(..), GlobalStore
 
 data CallbackClass = SrvMsg | UserMsg | Ping | Numeric Int deriving Eq
 
+testCounter = GlobalKey (0::Int) "testCounter"
+
+
 c_chan   = "#votebot-testing"
-                   
-callbacks :: [( CallbackClass, SMsg -> GlobalState (Maybe CMsg) )]
-callbacks = [ ( Ping, \(SPing srv) -> return $ Just (CMsg PONG [srv]) )
-            , ( UserMsg, \msg@(SPrivmsg (SUser nick _ _) (RChannel _) _) -> return $ respondToChanMsg msg )
-            , ( Numeric 376, \(SNumeric _ 376 _) -> return $ Just (CMsg JOIN [c_chan]) )
+
+callbacks :: [SMsg -> GlobalState (Maybe CMsg)]
+callbacks = [ respondToPing
+            , respondToChanMsg
+            , respondTo376
             ]
 
-respondToChanMsg :: SMsg -> Maybe CMsg
+respondToChanMsg :: SMsg -> GlobalState (Maybe CMsg)
 respondToChanMsg (SPrivmsg (SUser nick _ _) ch text)
-    | nick /= "nyaffles" = Nothing
-    | otherwise = Just (CMsg PRIVMSG [show ch, "Echoing: " ++ text])
+    do count <- getGlobal testCounter
+       setGlobal testCounter (count+1)
+       return $ Just (CMsg PRIVMSG [show ch, "Echoing: " ++ text ++ " - " ++ show (count+1)])
+
+respondToPing :: SMsg -> GlobalState (Maybe CMsg)
+respondToPing (SPing srv) = return $ Just (CMsg PONG [srv])
+
+respondTo376 :: SMsg -> GlobalState (Maybe CMsg)
+respondTo376 (SNumeric _ 376 _) = return $ Just (CMsg JOIN [c_chan])
+
