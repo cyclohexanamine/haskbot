@@ -6,14 +6,14 @@ on their arguments. This means that to define a callback for a certain message,
 you just need to write a fuction that only pattern-matches to that kind of message.
 Message structures are defined in 'Msg'
 
-For example, the message structure for a PRIVMSG is 
+For example, the message structure for a PRIVMSG is
 @(SPrivMsg Sender Recipient text)@, and more specifically, messages to channels from
 users would be @(SPrivmsg (SUser nick user host) (RChannel chan) text@. So if we want
 a callback to be called for all channel messages from users, echoing the message
 received, we would define a callback function
 
 > echoCallback :: SMsg -> Bot ()
-> echoCallback (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) = 
+> echoCallback (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
 >     writeMsg $ CMsg PRIVMSG [show ch, "Echoing: " ++ text]
 
 The Bot () monad allows callbacks to access IO functions (via @liftIO@) and

@@ -5,12 +5,12 @@ window.onload = function () {pageLoad();setSynopsis("mini_Scripting.html");};
 all callbacks to all events, but will ignore any that fail to pattern-match
 on their arguments. This means that to define a callback for a certain message,
 you just need to write a fuction that only pattern-matches to that kind of message.
-Message structures are defined in <code>Msg</code></p><p>For example, the message structure for a PRIVMSG is 
+Message structures are defined in <code>Msg</code></p><p>For example, the message structure for a PRIVMSG is
 <code>(SPrivMsg Sender Recipient text)</code>, and more specifically, messages to channels from
 users would be <code>(SPrivmsg (SUser nick user host) (RChannel chan) text</code>. So if we want
 a callback to be called for all channel messages from users, echoing the message
 received, we would define a callback function</p><pre>echoCallback :: SMsg -&gt; Bot ()
-echoCallback (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) = 
+echoCallback (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
     writeMsg $ CMsg PRIVMSG [show ch, &quot;Echoing: &quot; ++ text]</pre><p>The Bot () monad allows callbacks to access IO functions (via <code>liftIO</code>) and
 a stateful store of global variables. Callbacks can simply use keys defined
 anywhere; <code>Run</code> doesn't need to know about them, unlike the callbacks.</p></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><a href="#v:callbacks">callbacks</a> :: [<a href="Msg.html#t:SMsg">SMsg</a> -&gt; <a href="Bot.html#t:Bot">Bot</a> ()]</li></ul></div><div id="interface"><h1>Documentation</h1><div class="top"><p class="src"><a id="v:callbacks" class="def">callbacks</a> :: [<a href="Msg.html#t:SMsg">SMsg</a> -&gt; <a href="Bot.html#t:Bot">Bot</a> ()] <a href="#v:callbacks" class="selflink">#</a></p><div class="doc"><p>The list of callbacks the bot should try to apply.</p></div></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.17.2</p></div></body></html>

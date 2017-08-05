@@ -1,5 +1,5 @@
 {-|
-Module: Run 
+Module: Run
 
 The main logic for the bot. Implements the core networking functionality,
 as well as finding and applying callbacks.
@@ -50,7 +50,7 @@ tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
 
 
 -- Networking
-      
+
 -- | The main listening loop: listen on the socket in 'socketH' until we get a
 -- line, then respond to that line and loop again.
 listen :: Bot ()

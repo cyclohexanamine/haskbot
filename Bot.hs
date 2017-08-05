@@ -4,8 +4,8 @@ Module: Bot
 IRC bot monad, carrying around a state and IO. Most IRC-specific logic
 is implemented in other modules.
 
-The state, 'GlobalStore', can hold values of arbitrary type; the keys used, 
-'GlobalKey', contain information about the type, so that the values can be 
+The state, 'GlobalStore', can hold values of arbitrary type; the keys used,
+'GlobalKey', contain information about the type, so that the values can be
 retrieved from the @Dynamic@ instances that are actually stored.
 
 The keys use strings for uniqueness, but are also unique by type. So
@@ -134,7 +134,7 @@ socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
 
 -- | Store for keeping global state of arbitrary type. It has keys of type
 -- @(TypeRep, String)@, allowing for uniqueness for keys of the same type
--- and guaranteeing that keys of different types will never collide. 
+-- and guaranteeing that keys of different types will never collide.
 -- It stores values as @Dynamic@, extracting them using the type information
 -- provided by the key.
 type GlobalStore = M.HashMap (TypeRep, String) Dynamic

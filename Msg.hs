@@ -10,7 +10,7 @@ Parsing is done using @Parsec@, and messages are parsed in a detailed way accord
 to their command.
 -}
 
-module Msg ( 
+module Msg (
     -- * Message structure
     -- ** Client message
     CMsg(..), ClientCmd(..),
@@ -28,7 +28,7 @@ import Text.Parsec.Prim (parserFail)
 import Text.Read (readMaybe)
 import Data.List (intercalate)
 
--- | Commands that will be sent by the bot; deliberately named 
+-- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.
 data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG
     deriving Show
