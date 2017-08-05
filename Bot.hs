@@ -1,6 +1,7 @@
 module Bot ( Bot, GlobalKey(..), GlobalStore
+           , setGlobalToStore
            , getGlobal, setGlobal, empty, runStateT
-           , socketH, logDest
+           , serverHostname, serverPort, botNick, botChan, logDest, socketH, configKeys
            , putLog, putLogInfo, putLogWarning, putLogError
            , writeMsg
            ) where
@@ -30,14 +31,6 @@ setGlobal :: Typeable a => GlobalKey a -> a -> Bot ()
 setGlobal k v = do store <- get
                    put $ setGlobalToStore store k v
 
--- | Key for logging output filename
-logDest :: GlobalKey String
-logDest = GlobalKey "bot.log" "logDest"
-
--- | Key for socket handle
-socketH :: GlobalKey Handle
-socketH = GlobalKey undefined "socketH"
-
 -- | Write a message out to the server
 writeMsg :: CMsg -> Bot ()
 writeMsg msg = do let msgString = joinMsg msg
@@ -54,16 +47,30 @@ putLog lvl s = do logFile <- getGlobal logDest
                   let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
                   lift $ appendFile logFile logLine
                   lift . putStrLn $ s
-                  
+
 putLogInfo = putLog "INFO"
 putLogWarning = putLog "WARNING"
 putLogError = putLog "ERROR"
 
 
+-- Keys for bot things.
+
+-- To be initialised in config: the key strings are the relevant keys in .ini, as SECTION.key
+serverHostname = GlobalKey undefined "SERVER.hostname" :: GlobalKey String -- ^ IRC server host
+serverPort = GlobalKey undefined "SERVER.port" :: GlobalKey String -- ^ IRC server port
+botNick = GlobalKey undefined "BOT.nick" :: GlobalKey String -- ^ Nick of bot
+botChan = GlobalKey undefined "BOT.chan" :: GlobalKey String -- ^ Channel that bot should join
+logDest = GlobalKey undefined "LOG.logfile" :: GlobalKey String -- ^ Logging output filename
+configKeys = [serverHostname, serverPort, botNick, botChan, logDest]
+
+-- | Socket handle - initialise in Main
+socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
+
+
 -- Store-specific
-                   
+
 -- | Key for GlobalStore - a is the type that's stored.
-data GlobalKey a = GlobalKey a  -- ^ default value: 
+data GlobalKey a = GlobalKey a  -- ^ default value:
                              String -- ^ id string (should be unique for keys of the same type)
 
 -- | Store for keeping global state of arbitrary type.
@@ -79,5 +86,3 @@ setGlobalToStore :: Typeable a => GlobalStore -> GlobalKey a -> a -> GlobalStore
 setGlobalToStore st (GlobalKey def s) val = M.insert k v st
     where k = (typeOf def, s)
           v = toDyn val
-
-          
