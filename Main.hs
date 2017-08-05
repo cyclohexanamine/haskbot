@@ -1,79 +1,34 @@
-import Network (PortID(PortNumber), connectTo)
-import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine)
-import Data.Maybe (catMaybes)
-import Data.Either (lefts, rights)
 import Data.Ini as I (Ini, readIniFile, lookupValue)
 import Data.Text (pack, unpack)
+import Data.Either (lefts, rights)
 import Data.List.Split (splitOn)
-import Control.Exception (PatternMatchFail, evaluate, try)
-import System.IO.Unsafe (unsafePerformIO)
 
-import Msg
-import Bot
-import Scripting
+import Bot (GlobalStore, GlobalKey(..), empty, runBot, configKeys, setGlobalToStore)
+import Run (startBot)
 
 
--- Message handling
-
-tryApply :: (a -> b) -> a -> Maybe b
-tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
-                Left err -> Nothing
-                Right r -> Just r
-               where tryMatch = try :: IO a -> IO (Either PatternMatchFail a)
-
-findCallbacks :: SMsg -> Bot ()
-findCallbacks msg = mapM_ id . catMaybes . map (flip tryApply $ msg) $ callbacks
-
-
-handle :: String -> Bot ()
-handle s = case readMsg s of
-    Left err -> putLogWarning ("Couldn't parse message - " ++ show err ++ " - " ++ s)
-    Right msg -> findCallbacks msg
-
-
--- Config
-
+-- | Load a config file in the ini format from 'loc', returning 'Right st', a store
+-- initialised with the values found, if the config sets all the relevant keys in 
+-- 'configKeys'. If there are some missing keys or a problem with the config, return
+-- 'Left err' instead, with an error message.
 loadConfig :: String -> IO (Either String GlobalStore)
 loadConfig loc = do
     iniE <- I.readIniFile loc
     case iniE of
       Left err -> do putStrLn err; return . Left $ "Couldn't find config file " ++ loc
       Right ini -> let vals = map (lookupK ini) $ configKeys
-                   in if length (rights vals) /= length configKeys then return . Left $ "Missing keys " ++ show (lefts vals)
-                      else return . Right . foldl (\st (k, v) -> setGlobalToStore st k v) empty . zip configKeys . rights $ vals
-
-  where lookupK :: I.Ini -> GlobalKey String -> Either String String
+                   in if length (rights vals) /= length configKeys 
+                        then return . Left $ "Missing keys " ++ show (lefts vals)
+                        else return . Right . foldl foldIntoStore empty . zip configKeys . rights $ vals
+  where foldIntoStore st (k, v) = setGlobalToStore st k v
         lookupK i (GlobalKey _ s) =
           case splitOn "." s of
             [sec, key] -> lookupValue (pack sec) (pack key) i >>= return . unpack
             _ -> Left $ "Invalid config key " ++ s
 
+
+main :: IO ()
 main = do
     cfg <- loadConfig "bot.ini"
     case cfg of Right st -> runBot startBot st
                 Left err -> putStrLn err
-
-
--- Main
-
-startBot :: Bot ()
-startBot = do
-    host <- getGlobal serverHostname
-    port <- getGlobal serverPort
-    h <- liftIO $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
-    liftIO $ hSetBuffering h NoBuffering
-    setGlobal socketH h
-
-    nick <- getGlobal botNick
-    writeMsg $ CMsg NICK [nick]
-    writeMsg $ CMsg USER [nick, "0", "*" , nick]
-
-    listen
-
-
-listen :: Bot ()
-listen = do h <- getGlobal socketH
-            s <- liftIO $ hGetLine h
-            putLogInfo $ "< " ++ s
-            handle s
-            listen

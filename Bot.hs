@@ -12,7 +12,7 @@ import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.Typeable (Typeable, TypeRep, typeOf)
 import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
 import Data.Time.Clock (getCurrentTime)
-import Text.Printf (hPrintf, HPrintfType)
+import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
 import Msg ( CMsg, joinMsg )
