@@ -1,3 +1,5 @@
+module Main where
+
 import Data.Ini as I (Ini, readIniFile, lookupValue)
 import Data.Text (pack, unpack)
 import Data.Either (lefts, rights)
@@ -7,10 +9,10 @@ import Bot (GlobalStore, GlobalKey(..), empty, runBot, configKeys, setGlobalToSt
 import Run (startBot)
 
 
--- | Load a config file in the ini format from 'loc', returning 'Right st', a store
+-- | Load a config file in the ini format from @loc@, returning @Right st@, a store
 -- initialised with the values found, if the config sets all the relevant keys in 
 -- 'configKeys'. If there are some missing keys or a problem with the config, return
--- 'Left err' instead, with an error message.
+-- @Left err@ instead, with an error message.
 loadConfig :: String -> IO (Either String GlobalStore)
 loadConfig loc = do
     iniE <- I.readIniFile loc

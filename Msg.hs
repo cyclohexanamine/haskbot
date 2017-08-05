@@ -1,37 +1,64 @@
-module Msg ( ClientCmd(..)
-           , CMsg(..), SMsg(..)
-           , Sender(..), Recipient(..)
-           , joinMsg, readMsg )
-where
+{-| module: Msg
+
+Defines the internal message structure, and implements parsing/serialising.
+
+Client messages are messages that will be sent to the server by the bot, usually
+within a callback. Server messages are what the bot receives from the server,
+having parsed them from the textual line sent.
+
+Parsing is done using @Parsec@, and messages are parsed in a detailed way according
+to their command.
+-}
+
+module Msg ( 
+    -- * Message structure
+    -- ** Client message
+    CMsg(..), ClientCmd(..),
+    -- ** Server message
+    SMsg(..), Sender(..), Recipient(..),
+    -- * Parsing and serialising
+    joinMsg, readMsg,
+    -- * Parsing internals
+    parseMsg, parseSender, parseRecipient, parseArgs,
+    parseUntil, parseWord,
+    ) where
 
 import Text.ParserCombinators.Parsec
-import Text.Parsec.Prim ( parserFail )
+import Text.Parsec.Prim (parserFail)
 import Text.Read (readMaybe)
 import Data.List (intercalate)
 
-
+-- | Commands that will be sent by the bot; deliberately named 
+-- identically to their textual representations, to make serialising easy.
 data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG
     deriving Show
 
+-- | Message that will be sent by the bot. The structure is fairly barebones
+-- because it's not going to be parsed; whatever is sending the message can
+-- implement the structure correctly itself.
 data CMsg = CMsg { command :: ClientCmd, argsC :: [String] }
     deriving Show
 
+-- | Message that will be sent by the server and received by the client.
+-- These are more detailed structures; messages are parsed into easily usable
+-- forms for callbacks. The exception is 'SNumeric', which is generic for all
+-- numeric messages and may have any number of arguments.
 data SMsg = SPing { srv :: String }
           | SNotice { from :: Sender, to :: Recipient, text :: String }
           | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
           | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
     deriving Show
 
+-- | Sender field - can be either user or server.
 data Sender = SUser { nick :: String, user :: String, host :: String }
             | SServer { host :: String }
     deriving Show
 
+-- | Recipient field - can either be user or channel.
 data Recipient = RUser String | RChannel String
 instance Show Recipient where
     show (RUser r) = r
     show (RChannel c) = "#" ++ c
-
-
 
 
 -- | Convert a message to a string in the IRC format.
@@ -46,7 +73,7 @@ joinMsg (CMsg cmd args) = show cmd ++ end ++ "\r\n"
 readMsg :: String -> Either ParseError SMsg
 readMsg = parse parseMsg ""
 
-
+-- | The main parser for messages.
 parseMsg :: Parser SMsg
 parseMsg = do src <- optionMaybe $ parseSender
               cmd <- parseWord
@@ -66,15 +93,20 @@ parseMsg = do src <- optionMaybe $ parseSender
                                     Left err -> parserFail . show $ err
                                     Right recipient -> return $ con sender recipient (a!!1)
 
+-- | Parse until one of the characters in @s@, or @eof@.
 parseUntil :: String -> Parser String
 parseUntil s = many1 $ do notFollowedBy eof
                           noneOf s
 
+-- | Parse until one of @space@ @:@ @\r@ @\n@ @eof@, and eat a trailing space
+-- if it's there.
 parseWord :: Parser String
 parseWord = do str <- parseUntil " :\r\n"
                optionMaybe . char $ ' '
                return str
 
+-- | Parse the sender field of a message, which will be a @:@, followed by
+-- either a user in the form @nick!user\@host@, or a server in the form @host@.
 parseSender :: Parser Sender
 parseSender = char ':' >> (user <|> host)
     where user = try $ do nick <- parseUntil "!"
@@ -85,11 +117,14 @@ parseSender = char ':' >> (user <|> host)
                           return $ SUser nick user host
           host = parseWord >>= return . SServer
 
+-- | Parse a recipient field, which might either be a channel in the form
+-- @#channel-name@, or a user in the form @nick@.
 parseRecipient :: Parser Recipient
 parseRecipient = channel <|> user
     where channel = char '#' >> parseUntil "" >>= return . RChannel
           user = parseUntil "" >>= return . RUser
 
+-- | Parse the arguments at the end of the message.
 parseArgs :: Parser [String]
 parseArgs = do args <- many parseWord
                lastArg <- optionMaybe $ do char ':'
@@ -97,5 +132,3 @@ parseArgs = do args <- many parseWord
                manyTill (oneOf "\r\n") eof
                return $ case lastArg of Just a  -> args ++ [a]
                                         Nothing -> args
-
-

@@ -1,4 +1,21 @@
-module Run (startBot) where
+{-|
+Module: Run 
+
+The main logic for the bot. Implements the core networking functionality,
+as well as finding and applying callbacks.
+
+There's a list of callbacks in 'Scripting.callbacks', and for each message,
+we will invoke all functions in there that successfully pattern match the
+message.
+-}
+
+
+module Run (
+    -- * Networking
+    startBot, listen,
+    -- * Message handling
+    handleLine, applyCallbacks, tryApply,
+    ) where
 
 import Network (PortID(PortNumber), connectTo)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine)
@@ -14,8 +31,6 @@ import Scripting (callbacks)
 -- Message handling
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
--- There's a list of callbacks in 'Scripting.callbacks', and we will invoke all functions in
--- there that successfully pattern match.
 handleLine :: String -> Bot ()
 handleLine s = case readMsg s of
     Left err -> putLogWarning ("Couldn't parse message - " ++ show err ++ " - " ++ s)
@@ -25,8 +40,8 @@ handleLine s = case readMsg s of
 applyCallbacks :: SMsg -> Bot ()
 applyCallbacks msg = mapM_ id . catMaybes . map (flip tryApply $ msg) $ callbacks
 
--- | Try to apply 'f' to 'v' - if pattern matching on the argument fails,
--- return 'Nothing'. Otherwise return 'Just (f v)'. Used to match callbacks.
+-- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
+-- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
 tryApply :: (a -> b) -> a -> Maybe b
 tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
                 Left err -> Nothing
