@@ -1,25 +1,33 @@
-module Bot ( Bot, GlobalKey(..), GlobalStore
-           , setGlobalToStore
-           , getGlobal, setGlobal, empty, runStateT
-           , serverHostname, serverPort, botNick, botChan, logDest, socketH, configKeys
-           , putLog, putLogInfo, putLogWarning, putLogError
-           , writeMsg
+{-# language GeneralizedNewtypeDeriving #-}
+
+module Bot ( module Bot
+           , liftIO, liftM, mapM
            ) where
 
-import Control.Monad.Trans (lift)
-import Control.Monad.Trans.State.Strict (StateT, get, put, runStateT)
+import Control.Monad (liftM, mapM_)
+import Control.Monad.Trans (MonadIO, liftIO)
+import Control.Monad.State.Strict (MonadState, get, put)
+import Control.Monad.Trans.State.Strict (StateT, runStateT)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.Typeable (Typeable, TypeRep, typeOf)
 import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
 import Data.Time.Clock (getCurrentTime)
-import Text.Printf (hPrintf)
+import Text.Printf (hPrintf, HPrintfType)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
 import Msg ( CMsg, joinMsg )
 
 
 -- | Bot monad, having State GlobalStore and IO.
-type Bot = StateT GlobalStore IO
+newtype Bot a = Bot {
+      getBot :: StateT GlobalStore IO a
+    } deriving (Applicative, Functor, Monad, MonadIO, MonadState GlobalStore)
+
+runBot :: Bot a -> GlobalStore -> IO a
+runBot b = liftM fst . runStateT (getBot b)
+
+empty = M.empty :: GlobalStore
+
 
 -- | Get the value at k in the state.
 getGlobal :: Typeable a => GlobalKey a -> Bot a
@@ -31,11 +39,12 @@ setGlobal :: Typeable a => GlobalKey a -> a -> Bot ()
 setGlobal k v = do store <- get
                    put $ setGlobalToStore store k v
 
+
 -- | Write a message out to the server
 writeMsg :: CMsg -> Bot ()
 writeMsg msg = do let msgString = joinMsg msg
                   h <- getGlobal socketH
-                  lift $ hPrintf h msgString
+                  liftIO . hPrintf h $ msgString
                   putLogInfo $ "> " ++ msgString
 
 -- | Write a line out to the log, prepended with a timestamp
@@ -43,10 +52,10 @@ putLog :: String -- ^ Log level (e.g., "INFO", "ERROR", etc.)
           -> String -- ^ Line
           -> Bot ()
 putLog lvl s = do logFile <- getGlobal logDest
-                  timestamp <- lift getCurrentTime
+                  timestamp <- liftIO getCurrentTime
                   let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
-                  lift $ appendFile logFile logLine
-                  lift . putStrLn $ s
+                  liftIO . putStrLn $ s
+                  liftIO . appendFile logFile $ logLine
 
 putLogInfo = putLog "INFO"
 putLogWarning = putLog "WARNING"
@@ -65,7 +74,6 @@ configKeys = [serverHostname, serverPort, botNick, botChan, logDest]
 
 -- | Socket handle - initialise in Main
 socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
-
 
 -- Store-specific
 

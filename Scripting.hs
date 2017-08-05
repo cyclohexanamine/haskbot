@@ -1,4 +1,4 @@
-module Scripting where
+module Scripting ( callbacks ) where
 
 import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..) )
 import Bot ( Bot, GlobalKey(..)

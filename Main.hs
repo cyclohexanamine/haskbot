@@ -1,7 +1,5 @@
 import Network (PortID(PortNumber), connectTo)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine)
-import Control.Monad (liftM, mapM_)
-import Control.Monad.Trans (lift)
 import Data.Maybe (catMaybes)
 import Data.Either (lefts, rights)
 import Data.Ini as I (Ini, readIniFile, lookupValue)
@@ -10,13 +8,9 @@ import Data.List.Split (splitOn)
 import Control.Exception (PatternMatchFail, evaluate, try)
 import System.IO.Unsafe (unsafePerformIO)
 
-import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..)
-           , joinMsg, readMsg )
-import Bot ( Bot, GlobalKey(..), GlobalStore, setGlobalToStore
-           , getGlobal, setGlobal, empty, runStateT
-           , writeMsg, putLogInfo, putLogWarning, putLogError
-           , socketH, serverHostname, serverPort, botNick, botChan, configKeys )
-import Scripting ( callbacks )
+import Msg
+import Bot
+import Scripting
 
 
 -- Message handling
@@ -56,30 +50,30 @@ loadConfig loc = do
 
 main = do
     cfg <- loadConfig "bot.ini"
-    case cfg of Right st -> runStateT runBot st >> return ()
+    case cfg of Right st -> runBot startBot st
                 Left err -> putStrLn err
 
 
 -- Main
 
-runBot :: Bot ()
-runBot = do
+startBot :: Bot ()
+startBot = do
     host <- getGlobal serverHostname
     port <- getGlobal serverPort
-    h <- lift $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
-    lift $ hSetBuffering h NoBuffering
+    h <- liftIO $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
+    liftIO $ hSetBuffering h NoBuffering
     setGlobal socketH h
-    
+
     nick <- getGlobal botNick
     writeMsg $ CMsg NICK [nick]
     writeMsg $ CMsg USER [nick, "0", "*" , nick]
-    
+
     listen
 
 
 listen :: Bot ()
 listen = do h <- getGlobal socketH
-            s <- lift $ hGetLine h
+            s <- liftIO $ hGetLine h
             putLogInfo $ "< " ++ s
             handle s
             listen
