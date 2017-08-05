@@ -1,71 +1,83 @@
-import Network (PortID(PortNumber), connectTo)
-import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine)
+module Bot ( Bot, GlobalKey(..), GlobalStore
+           , getGlobal, setGlobal, empty, runStateT
+           , socketH, logDest
+           , putLog, putLogInfo, putLogWarning, putLogError
+           , writeMsg
+           ) where
+
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.State.Strict (StateT, get, put, runStateT)
+import Data.Dynamic (Dynamic, fromDynamic, toDyn)
+import Data.Typeable (Typeable, TypeRep, typeOf)
+import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
+import Data.Time.Clock (getCurrentTime)
 import Text.Printf (hPrintf)
-import Control.Monad (liftM, mapM_)
-import Data.Maybe (catMaybes)
-import Control.Exception (PatternMatchFail, evaluate, try)
-import System.IO.Unsafe (unsafePerformIO)
+import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
-import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..)
-           , joinMsg, readMsg )
-import GlobalState ( GlobalState, GlobalKey(..), GlobalStore
-                   , getGlobal, setGlobal, empty, runState )
-import Scripting ( callbacks )
+import Msg ( CMsg, joinMsg )
 
 
--- Config
+-- | Bot monad, having State GlobalStore and IO.
+type Bot = StateT GlobalStore IO
 
-c_server = "irc.rizon.net"
-c_port   = 6667
-c_chan   = "#votebot-testing"
-c_nick   = "voteplus"
+-- | Get the value at k in the state.
+getGlobal :: Typeable a => GlobalKey a -> Bot a
+getGlobal k = do store <- get
+                 return $ getGlobalFromStore store k
+
+-- | Set the value at k to v in the state.
+setGlobal :: Typeable a => GlobalKey a -> a -> Bot ()
+setGlobal k v = do store <- get
+                   put $ setGlobalToStore store k v
+
+-- | Key for logging output filename
+logDest :: GlobalKey String
+logDest = GlobalKey "bot.log" "logDest"
+
+-- | Key for socket handle
+socketH :: GlobalKey Handle
+socketH = GlobalKey undefined "socketH"
+
+-- | Write a message out to the server
+writeMsg :: CMsg -> Bot ()
+writeMsg msg = do let msgString = joinMsg msg
+                  h <- getGlobal socketH
+                  lift $ hPrintf h msgString
+                  putLogInfo $ "> " ++ msgString
+
+-- | Write a line out to the log, prepended with a timestamp
+putLog :: String -- ^ Log level (e.g., "INFO", "ERROR", etc.)
+          -> String -- ^ Line
+          -> Bot ()
+putLog lvl s = do logFile <- getGlobal logDest
+                  timestamp <- lift getCurrentTime
+                  let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
+                  lift $ appendFile logFile logLine
+                  lift . putStrLn $ s
+                  
+putLogInfo = putLog "INFO"
+putLogWarning = putLog "WARNING"
+putLogError = putLog "ERROR"
 
 
--- Applying callbacks
+-- Store-specific
+                   
+-- | Key for GlobalStore - a is the type that's stored.
+data GlobalKey a = GlobalKey a  -- ^ default value: 
+                             String -- ^ id string (should be unique for keys of the same type)
 
-tryApply :: (a -> b) -> a -> Maybe b
-tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
-                Left err -> Nothing
-                Right r -> Just r
-               where tryMatch = try :: IO a -> IO (Either PatternMatchFail a)
+-- | Store for keeping global state of arbitrary type.
+type GlobalStore = M.HashMap (TypeRep, String) Dynamic
 
-findCallbacks :: SMsg -> [GlobalState (Maybe CMsg)]
-findCallbacks msg = catMaybes . map ($msg) $ map tryApply callbacks
+getGlobalFromStore :: Typeable a => GlobalStore -> GlobalKey a -> a
+getGlobalFromStore st (GlobalKey def s) =
+    case M.lookup (typeOf def, s) st >>= fromDynamic of
+      Just x -> x
+      Nothing -> def
 
-respondToChanMsg :: SMsg -> Maybe CMsg
-respondToChanMsg (SPrivmsg (SUser nick _ _) ch text)
-    | nick /= "nyaffles" = Nothing
-    | otherwise = Just (CMsg PRIVMSG [show ch, "Echoing: " ++ text])
+setGlobalToStore :: Typeable a => GlobalStore -> GlobalKey a -> a -> GlobalStore
+setGlobalToStore st (GlobalKey def s) val = M.insert k v st
+    where k = (typeOf def, s)
+          v = toDyn val
 
-respond :: SMsg -> GlobalState [CMsg]
-respond msg = liftM catMaybes . sequence $ cb
-    where cb = findCallbacks msg
-
-
--- Message handling
-
-handle :: Handle -> String -> GlobalState (IO ())
-handle h s = case readMsg s of
-    Left err -> return $! putStrLn ("Message parse error - " ++ show err ++ " - " ++ s)
-    Right msg -> (liftM $ mapM_ (writeMsg h)) (respond msg)
-
-writeMsg :: Handle -> CMsg -> IO ()
-writeMsg h m = let msgString = joinMsg m
-                 in do hPrintf h msgString
-                       putStrLn $ "> " ++ msgString
-
-
--- Main
-
-main = do
-    h <- connectTo c_server (PortNumber (fromIntegral c_port))
-    hSetBuffering h NoBuffering
-    writeMsg h . CMsg NICK $ [c_nick]
-    writeMsg h . CMsg USER $ [c_nick, "0", "*" , c_nick]
-    listen h empty
-
-listen :: Handle -> GlobalStore -> IO ()
-listen h st = do s <- hGetLine h
-                 putStrLn s
-                 let (ioact, newSt) = runState (handle h s) st
-                  in do ioact; listen h newSt
+          
