@@ -1,21 +1,24 @@
 {-| module: Msg
 
-Defines the internal message structure, and implements parsing/serialising.
+Defines the internal message/event structure, and implements parsing/serialising.
+
+Server events are either messages that the bot has received from the server, like
+a PRIVMSG, or other events like the bot starting up. They're parsed from the
+textual line received by a parser using @Parsec@, and for common commands with
+specific syntax, they're parsed in a detailed way.
 
 Client messages are messages that will be sent to the server by the bot, usually
-within a callback. Server messages are what the bot receives from the server,
-having parsed them from the textual line sent.
-
-Parsing is done using @Parsec@, and messages are parsed in a detailed way according
-to their command.
+within a callback. Client messages can be sent generically, as a stock 'CMsg'.
 -}
 
 module Msg (
     -- * Message structure
+    -- ** Event
+    SEvent(..), Sender(..), Recipient(..),
     -- ** Client message
     CMsg(..), ClientCmd(..),
-    -- ** Server message
-    SMsg(..), Sender(..), Recipient(..),
+    -- * Sending messages
+
     -- * Parsing and serialising
     joinMsg, readMsg,
     -- * Parsing internals
@@ -35,18 +38,23 @@ data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG
 
 -- | Message that will be sent by the bot. The structure is fairly barebones
 -- because it's not going to be parsed; whatever is sending the message can
--- implement the structure correctly itself.
-data CMsg = CMsg { command :: ClientCmd, argsC :: [String] }
+-- implement the structure correctly itself, or a helper function in 'Bot'
+-- can handle that.
+data CMsg
+    = CMsg { command :: ClientCmd, argsC :: [String] }
     deriving Show
 
--- | Message that will be sent by the server and received by the client.
--- These are more detailed structures; messages are parsed into easily usable
--- forms for callbacks. The exception is 'SNumeric', which is generic for all
--- numeric messages and may have any number of arguments.
-data SMsg = SPing { srv :: String }
-          | SNotice { from :: Sender, to :: Recipient, text :: String }
-          | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
-          | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
+-- | Events: a message that's been sent by the server and received by the
+-- client, or an event initiated on the bot side like startup. The messages have
+-- detailed structures; they're parsed into easily usable forms for callbacks.
+-- The exception is 'SNumeric', which is generic for all numeric messages and
+-- may have any number of arguments.
+data SEvent
+    = SPing { srv :: String }
+    | SNotice { from :: Sender, to :: Recipient, text :: String }
+    | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
+    | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
+    | Startup
     deriving Show
 
 -- | Sender field - can be either user or server.
@@ -70,11 +78,11 @@ joinMsg (CMsg cmd args) = show cmd ++ end ++ "\r\n"
                   else ""
 
 -- | Parse a message string in the IRC format.
-readMsg :: String -> Either ParseError SMsg
+readMsg :: String -> Either ParseError SEvent
 readMsg = parse parseMsg ""
 
 -- | The main parser for messages.
-parseMsg :: Parser SMsg
+parseMsg :: Parser SEvent
 parseMsg = do src <- optionMaybe $ parseSender
               cmd <- parseWord
               args <- parseArgs

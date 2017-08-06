@@ -1,8 +1,8 @@
 {-|
 Module: Run
 
-The main logic for the bot. Implements the core networking functionality,
-as well as finding and applying callbacks.
+The main event logic for the bot. Implements the core networking
+functionality, as well as finding and applying callbacks.
 
 There's a list of callbacks in 'Scripting.callbacks', and for each message,
 we will invoke all functions in there that successfully pattern match the
@@ -40,9 +40,9 @@ import Scripting as S (callbacks)
 runTimers :: Bot ()
 runTimers = do timers <- getGlobal timerList
                currTime <- liftIO getCurrentTime
-               let expired = filter (\(t, c) -> t < currTime) timers
-               let newTimers = mapMaybe (\a@(t, c) -> if t < currTime then Nothing else Just a) timers
-               mapM_ id . map snd $ expired
+               let expired = filter (\(h, t, c) -> t < currTime) timers
+               let newTimers = mapMaybe (\a@(h, t, c) -> if t < currTime then Nothing else Just a) timers
+               mapM_ id . map (\(h, t, c)->c) $ expired
                setGlobal timerList newTimers
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
@@ -52,9 +52,9 @@ handleLine s = case readMsg s of
     Right msg -> applyCallbacks msg
 
 -- | Apply all message callbacks in 'callbackList' which pattern-match the message.
-applyCallbacks :: SMsg -> Bot ()
+applyCallbacks :: SEvent -> Bot ()
 applyCallbacks msg = do callbacks <- getGlobal callbackList
-                        mapM_ id . catMaybes . map (flip tryApply $ msg) $ callbacks
+                        mapM_ id . catMaybes . map (flip tryApply $ msg) . map snd $callbacks
 
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
 -- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
@@ -86,9 +86,8 @@ listenMain mv = do
     runTimers
     listenMain mv
 
--- | Startup. We should already have initialised global variables about the server and
--- nick from the config, and we use those to connect to the server, sending registration
--- info, then starting the listening loop.
+-- | Startup. We should already have initialised global variables about the server and nick from the config, and we use those to connect to the server.
+-- Then initialise callbacks, start the listening loop and signal a 'Startup' event.
 startBot :: Bot ()
 startBot = do
     host <- getGlobal serverHostname
@@ -96,13 +95,11 @@ startBot = do
     h <- liftIO $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
     liftIO $ hSetBuffering h LineBuffering
     setGlobal socketH h
-    
-    setGlobal callbackList S.callbacks
 
-    nick <- getGlobal botNick
-    writeMsg $ CMsg NICK [nick]
-    writeMsg $ CMsg USER [nick, "0", "*" , nick]
+    mapM_ addCallback S.callbacks
 
     mv <- liftIO newEmptyMVar
     liftIO . forkIO $ listenH h mv
+
+    applyCallbacks Startup
     listenMain mv

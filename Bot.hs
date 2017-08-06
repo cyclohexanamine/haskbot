@@ -38,10 +38,13 @@ module Bot (
     timerList,
 
     -- * Callback control
-    addTimer, runInS,
+    CallbackHandle(..),
+    addCallback, removeCallback,
+    addTimer, removeTimer, runInS,
 
     -- * IO
-    writeMsg,
+    -- ** Messaging
+    writeMsg, sendMessage, joinChannels,
     -- ** Logging
     putLog, putLogInfo, putLogWarning, putLogError,
 
@@ -63,6 +66,8 @@ import Data.Typeable (Typeable, TypeRep, typeOf)
 import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
 import Data.Time.Clock (UTCTime, getCurrentTime, addUTCTime)
 import Data.Char (isSpace)
+import Data.UUID (UUID)
+import Data.UUID.V4 (nextRandom)
 import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
@@ -100,6 +105,16 @@ writeMsg msg = do let msgString = joinMsg msg
                   liftIO . hPrintf h $ msgString
                   putLogInfo $ "> " ++ rstrip msgString
 
+-- | Send a textual message to the recipient
+sendMessage :: Recipient -> String -> Bot ()
+sendMessage r t = writeMsg $ CMsg PRIVMSG [show r, t]
+
+-- | Join the list of channels, where each element is a channel name string (e.g.,
+-- @"#channame"@)
+joinChannels :: [String] -> Bot ()
+joinChannels = mapM_ (\c -> writeMsg $ CMsg JOIN [c])
+
+
 -- | Write a line out to the log, prepended with a timestamp.
 putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
           -> String -- ^ Line
@@ -116,23 +131,55 @@ putLogWarning = putLog "WARNING"
 -- | Log with level ERROR.
 putLogError = putLog "ERROR"
 
--- | Add a timer to run the given computation at the given time.
-addTimer :: UTCTime -> Bot () -> Bot ()
-addTimer time cb = do timers <- getGlobal timerList
-                      setGlobal timerList $ timers ++ [(time, cb)]
 
--- | Run the given computation in the given number of seconds.
-runInS :: Integral a => a -> Bot () -> Bot ()
+-- | A callback handle referring to callbacks; internally a randomly-generated
+-- UUID.
+newtype CallbackHandle = CallbackHandle UUID
+    deriving (Eq, Show, Read)
+
+-- | Add the given function as a callback for events; return the handle.
+addCallback :: (SEvent -> Bot()) -> Bot (CallbackHandle)
+addCallback cb = do callbacks <- getGlobal callbackList
+                    handle <- liftM CallbackHandle $ liftIO nextRandom
+                    setGlobal callbackList $ callbacks ++ [(handle, cb)]
+                    return handle
+
+-- | Remove the callback referred to by the handle. Silently fails if there
+-- is no such callback.
+removeCallback :: CallbackHandle -> Bot ()
+removeCallback h = do callbacks <- getGlobal callbackList
+                      setGlobal callbackList . filter ((/=h).fst) $ callbacks
+
+
+-- | Add a timer to run the given computation at the given time, returning
+-- a handle.
+addTimer :: UTCTime -> Bot () -> Bot (CallbackHandle)
+addTimer time cb = do timers <- getGlobal timerList
+                      handle <- liftM CallbackHandle $ liftIO nextRandom
+                      setGlobal timerList $ timers ++ [(handle, time, cb)]
+                      return handle
+
+-- | Remove the timer referred to by the handle. Silently fails if there
+-- is no such timer.
+removeTimer :: CallbackHandle -> Bot ()
+removeTimer h = do timers <- getGlobal timerList
+                   setGlobal timerList . filter (\(h',_,_)->h'/=h) $ timers
+
+-- | Run the given computation in the given number of seconds, returning
+-- a handle.
+runInS :: Integral a => a -> Bot () -> Bot (CallbackHandle)
 runInS s cb = do currTime <- liftIO getCurrentTime
                  let diffTime = fromIntegral s
                  let newTime = addUTCTime diffTime currTime
                  addTimer newTime cb
 
 
+
+
 -- Keys for bot things.
 {- $other __Already initialised__ -}
 -- | List of timed callbacks, to be called at the time specified.
-timerList = GlobalKey [] "timerList" :: GlobalKey [(UTCTime, Bot ())]
+timerList = GlobalKey [] "timerList" :: GlobalKey [(CallbackHandle, UTCTime, Bot ())]
 
 {- $configkey __To be initialised in config:__
     The key strings here map to the relevant keys in .ini, as "SECTION.key": -}
@@ -153,7 +200,7 @@ configKeys = [serverHostname, serverPort, botNick, botChan, logDest]
 -- | Socket handle
 socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
 -- | List of callbacks to apply to messages
-callbackList = GlobalKey undefined "callbacks" :: GlobalKey [SMsg -> Bot ()]
+callbackList = GlobalKey [] "callbacks" :: GlobalKey [(CallbackHandle, SEvent -> Bot ())]
 
 -- Store-specific
 

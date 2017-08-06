@@ -12,7 +12,7 @@ users would be @(SPrivmsg (SUser nick user host) (RChannel chan) text@. So if we
 a callback to be called for all channel messages from users, echoing the message
 received, we would define a callback function
 
-> echoCallback :: SMsg -> Bot ()
+> echoCallback :: SEvent -> Bot ()
 > echoCallback (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
 >     writeMsg $ CMsg PRIVMSG [show ch, "Echoing: " ++ text]
 
@@ -23,16 +23,16 @@ anywhere; 'Run' doesn't need to know about them, unlike the callbacks.
 
 module Scripting ( callbacks ) where
 
-import Bot ( Bot, SMsg )
-           
+import Bot ( Bot, SEvent )
+
 import Scripts.Core
 import Scripts.Example
 
 -- | The list of callbacks the bot should try to apply.
-callbacks :: [SMsg -> Bot ()]
-callbacks = [ respondToPing
+callbacks :: [SEvent -> Bot ()]
+callbacks = [ startup
+            , respondToPing
             , respondToChanMsg
-            , respondTo376
             ]
 
 
