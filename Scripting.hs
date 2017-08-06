@@ -27,7 +27,8 @@ import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..) )
 import Bot ( Bot, GlobalKey(..)
            , botChan
            , getGlobal, setGlobal
-           , writeMsg, putLogInfo )
+           , writeMsg, putLogInfo
+           , runInS )
 
 -- | The list of callbacks the bot should try to apply.
 callbacks :: [SMsg -> Bot ()]
@@ -44,6 +45,7 @@ respondToChanMsg (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
     do count <- getGlobal testCounter
        setGlobal testCounter (count+1)
        writeMsg $ CMsg PRIVMSG [show ch, "Echoing: " ++ text ++ " - " ++ show (count+1)]
+       runInS 4 . writeMsg $ CMsg PRIVMSG [show ch, "delayed action"]
 
 respondToPing :: SMsg -> Bot ()
 respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]

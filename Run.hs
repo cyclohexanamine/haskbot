@@ -17,15 +17,16 @@ and the main thread. We can do non-blocking reads on the MVar reliably.
 module Run (
     -- * Networking
     startBot, listenMain, listenH,
-    -- * Message handling
-    handleLine, applyCallbacks, tryApply,
+    -- * Callback handling
+    handleLine, applyCallbacks, tryApply, runTimers
     ) where
 
 import Network (PortID(PortNumber), connectTo)
 import System.IO (Handle, BufferMode(LineBuffering), hSetBuffering, hGetLine, hReady)
-import Data.Maybe (catMaybes)
-import Control.Exception (PatternMatchFail, evaluate, try)
 import System.IO.Unsafe (unsafePerformIO)
+import Data.Maybe (catMaybes, mapMaybe)
+import Data.Time.Clock (getCurrentTime)
+import Control.Exception (PatternMatchFail, evaluate, try)
 import Control.Concurrent
 import Control.Concurrent.MVar
 
@@ -34,7 +35,16 @@ import Bot
 import Scripting (callbacks)
 
 
--- Message handling
+-- Callbacks
+
+-- | Check all the timers that are outstanding, and run all that have expired.
+runTimers :: Bot ()
+runTimers = do timers <- getGlobal timerList
+               currTime <- liftIO getCurrentTime
+               let expired = filter (\(t, c) -> t < currTime) timers
+               let newTimers = mapMaybe (\a@(t, c) -> if t < currTime then Nothing else Just a) timers
+               mapM_ id . map snd $ expired
+               setGlobal timerList newTimers
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
 handleLine :: String -> Bot ()
@@ -63,16 +73,17 @@ listenH h mv = do
     s <- hGetLine h
     putMVar mv s
     listenH h mv
-    
+
 -- | The main listening loop: check whether 'listenH' has read a line,
--- and process that if there is one.
+-- and process that if there is one. Then process any timers.
 listenMain :: MVar String -> Bot ()
-listenMain mv = do 
-    mbLine <-  liftIO . tryTakeMVar $ mv 
-    case mbLine of 
+listenMain mv = do
+    mbLine <-  liftIO . tryTakeMVar $ mv
+    case mbLine of
       Just s -> do putLogInfo $ "< " ++ s
                    handleLine s
       Nothing -> liftIO $ threadDelay 100000
+    runTimers
     listenMain mv
 
 -- | Startup. We should already have initialised global variables about the server and

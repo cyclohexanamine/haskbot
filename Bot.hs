@@ -33,7 +33,12 @@ module Bot (
     -- $configkey
     serverHostname, serverPort, botNick, botChan, logDest, configKeys,
     -- $mainkey
-    socketH,
+    socketH, callbackList,
+    -- $other
+    timerList,
+
+    -- * Callback control
+    addTimer, runInS,
 
     -- * IO
     writeMsg,
@@ -55,11 +60,11 @@ import Control.Monad.Trans.State.Strict (StateT, runStateT)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.Typeable (Typeable, TypeRep, typeOf)
 import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
-import Data.Time.Clock (getCurrentTime)
+import Data.Time.Clock
 import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
-import Msg ( CMsg, joinMsg )
+import Msg ( CMsg, SMsg, joinMsg )
 
 
 -- | Bot monad, having State GlobalStore and IO.
@@ -109,8 +114,23 @@ putLogWarning = putLog "WARNING"
 -- | Log with level ERROR.
 putLogError = putLog "ERROR"
 
+-- | Add a timer to run the given computation at the given time.
+addTimer :: UTCTime -> Bot () -> Bot ()
+addTimer time cb = do timers <- getGlobal timerList
+                      setGlobal timerList $ timers ++ [(time, cb)]
+
+-- | Run the given computation in the given number of seconds.
+runInS :: Integral a => a -> Bot () -> Bot ()
+runInS s cb = do currTime <- liftIO getCurrentTime
+                 let diffTime = fromIntegral s
+                 let newTime = addUTCTime diffTime currTime
+                 addTimer newTime cb
+
 
 -- Keys for bot things.
+{- $other __Already initialised__ -}
+-- | List of timed callbacks, to be called at the time specified.
+timerList = GlobalKey [] "timerList" :: GlobalKey [(UTCTime, Bot ())]
 
 {- $configkey __To be initialised in config:__
     The key strings here map to the relevant keys in .ini, as "SECTION.key": -}
@@ -126,9 +146,12 @@ botChan = GlobalKey undefined "BOT.chan" :: GlobalKey String
 logDest = GlobalKey undefined "LOG.logfile" :: GlobalKey String
 -- | A list of the above keys.
 configKeys = [serverHostname, serverPort, botNick, botChan, logDest]
+
 {- $mainkey __To be initialised elsewhere before running ('Run.startBot'):__ -}
 -- | Socket handle
 socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
+-- | List of callbacks to apply to messages
+callbackList = GlobalKey undefined "callbacks" :: GlobalKey [SMsg -> Bot ()]
 
 -- Store-specific
 
