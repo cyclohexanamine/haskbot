@@ -46,7 +46,7 @@ parseCmdArgs =  do
     if length errs /= 0 || Help `elem` argL || length configs == 0
       then return . Left $ (concat errs ++ usageInfo header flags)
       else return . Right . head $ configs
-  where header = "Usage: Main -c configfile [-h]"
+  where header = "Usage: haskbot -c configfile [-h]"
 
 
 -- | Load a config file in the ini format from @loc@, returning @Right st@, a store

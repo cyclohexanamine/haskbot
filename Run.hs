@@ -7,21 +7,27 @@ as well as finding and applying callbacks.
 There's a list of callbacks in 'Scripting.callbacks', and for each message,
 we will invoke all functions in there that successfully pattern match the
 message.
+
+Support for non-blocking calls on Windows is poor, so we implement our own
+non-blocking, using a listener thread that blocks, and an MVar between that
+and the main thread. We can do non-blocking reads on the MVar reliably.
 -}
 
 
 module Run (
     -- * Networking
-    startBot, listen,
+    startBot, listenMain, listenH,
     -- * Message handling
     handleLine, applyCallbacks, tryApply,
     ) where
 
 import Network (PortID(PortNumber), connectTo)
-import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine)
+import System.IO (Handle, BufferMode(LineBuffering), hSetBuffering, hGetLine, hReady)
 import Data.Maybe (catMaybes)
 import Control.Exception (PatternMatchFail, evaluate, try)
 import System.IO.Unsafe (unsafePerformIO)
+import Control.Concurrent
+import Control.Concurrent.MVar
 
 import Msg
 import Bot
@@ -51,14 +57,23 @@ tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
 
 -- Networking
 
--- | The main listening loop: listen on the socket in 'socketH' until we get a
--- line, then respond to that line and loop again.
-listen :: Bot ()
-listen = do h <- getGlobal socketH
-            s <- liftIO $ hGetLine h
-            putLogInfo $ "< " ++ s
-            handleLine s
-            listen
+-- | Listen on the socket provided, writing lines we get into the @MVar@.
+listenH :: Handle -> MVar String -> IO ()
+listenH h mv = do
+    s <- hGetLine h
+    putMVar mv s
+    listenH h mv
+    
+-- | The main listening loop: check whether 'listenH' has read a line,
+-- and process that if there is one.
+listenMain :: MVar String -> Bot ()
+listenMain mv = do 
+    mbLine <-  liftIO . tryTakeMVar $ mv 
+    case mbLine of 
+      Just s -> do putLogInfo $ "< " ++ s
+                   handleLine s
+      Nothing -> liftIO $ threadDelay 100000
+    listenMain mv
 
 -- | Startup. We should already have initialised global variables about the server and
 -- nick from the config, and we use those to connect to the server, sending registration
@@ -68,11 +83,13 @@ startBot = do
     host <- getGlobal serverHostname
     port <- getGlobal serverPort
     h <- liftIO $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
-    liftIO $ hSetBuffering h NoBuffering
+    liftIO $ hSetBuffering h LineBuffering
     setGlobal socketH h
 
     nick <- getGlobal botNick
     writeMsg $ CMsg NICK [nick]
     writeMsg $ CMsg USER [nick, "0", "*" , nick]
 
-    listen
+    mv <- liftIO newEmptyMVar
+    liftIO . forkIO $ listenH h mv
+    listenMain mv
