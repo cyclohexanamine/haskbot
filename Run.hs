@@ -32,7 +32,7 @@ import Control.Concurrent.MVar
 
 import Msg
 import Bot
-import Scripting (callbacks)
+import Scripting as S (callbacks)
 
 
 -- Callbacks
@@ -52,9 +52,10 @@ handleLine s = case readMsg s of
     Left err -> putLogWarning ("Couldn't parse message - " ++ show err ++ " - " ++ s)
     Right msg -> applyCallbacks msg
 
--- | Apply all message callbacks in 'callbacks' which pattern-match the message.
+-- | Apply all message callbacks in 'callbackList' which pattern-match the message.
 applyCallbacks :: SMsg -> Bot ()
-applyCallbacks msg = mapM_ id . catMaybes . map (flip tryApply $ msg) $ callbacks
+applyCallbacks msg = do callbacks <- getGlobal callbackList
+                        mapM_ id . catMaybes . map (flip tryApply $ msg) $ callbacks
 
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
 -- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
@@ -96,6 +97,8 @@ startBot = do
     h <- liftIO $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
     liftIO $ hSetBuffering h LineBuffering
     setGlobal socketH h
+    
+    setGlobal callbackList S.callbacks
 
     nick <- getGlobal botNick
     writeMsg $ CMsg NICK [nick]

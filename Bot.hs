@@ -60,7 +60,8 @@ import Control.Monad.Trans.State.Strict (StateT, runStateT)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.Typeable (Typeable, TypeRep, typeOf)
 import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
-import Data.Time.Clock
+import Data.Time.Clock (UTCTime, getCurrentTime, addUTCTime)
+import Data.Char (isSpace)
 import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
@@ -96,7 +97,7 @@ writeMsg :: CMsg -> Bot ()
 writeMsg msg = do let msgString = joinMsg msg
                   h <- getGlobal socketH
                   liftIO . hPrintf h $ msgString
-                  putLogInfo $ "> " ++ msgString
+                  putLogInfo $ "> " ++ rstrip msgString
 
 -- | Write a line out to the log, prepended with a timestamp.
 putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
@@ -182,3 +183,8 @@ setGlobalToStore :: Typeable a => GlobalStore -> GlobalKey a -> a -> GlobalStore
 setGlobalToStore st (GlobalKey def s) val = M.insert k v st
     where k = (typeOf def, s)
           v = toDyn val
+
+
+-- Misc utility
+
+rstrip = reverse . dropWhile isSpace . reverse
