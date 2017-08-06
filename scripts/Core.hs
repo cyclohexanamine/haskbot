@@ -6,8 +6,8 @@ responding to pings, joining and leaving channels, and so on.
 -}
 
 module Scripts.Core (
-    -- * Startup
-    startup, respondTo376,
+    -- * Connection
+    connected, respondTo376,
     -- * Other
     respondToPing,
     ) where
@@ -17,8 +17,8 @@ import Bot
 handle376 = GlobalKey undefined "handle376" :: GlobalKey CallbackHandle
 
 -- | User registration, and set a callback to join channels.
-startup :: SEvent -> Bot ()
-startup (Startup) = do
+connected :: SEvent -> Bot ()
+connected (Connected) = do
     nick <- getGlobal' botNick
     writeMsg $ CMsg NICK [nick]
     writeMsg $ CMsg USER [nick, "0", "*" , nick]

@@ -16,7 +16,7 @@ and the main thread. We can do non-blocking reads on the MVar reliably.
 
 module Run (
     -- * Networking
-    startBot, listenMain, listenH,
+    startBot, connectAndListen, listenMain, listenH,
     -- * Callback handling
     handleLine, applyCallbacks, tryApply, runTimers
     ) where
@@ -27,7 +27,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Time.Clock (getCurrentTime)
 import Control.Exception (PatternMatchFail, evaluate, try)
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent (forkFinally, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 
 import Bot
@@ -74,32 +74,49 @@ listenH h mv = do
     putMVar mv s
     listenH h mv
 
--- | The main listening loop: check whether 'listenH' has read a line,
--- and process that if there is one. Then process any timers.
-listenMain :: MVar String -> Bot ()
-listenMain mv = do
-    mbLine <-  liftIO . tryTakeMVar $ mv
-    case mbLine of
-      Just s -> do putLogInfo $ "< " ++ s
-                   handleLine s
-      Nothing -> liftIO $ threadDelay 100000
-    runTimers
-    listenMain mv
+-- | The main listening loop:
+-- Check whether the socket listener thread has died, and restart things
+-- with a backoff if so.
+-- Otherwise, check whether 'listenH' has read a line, and process that
+-- if there is one. Then process any timers.
+listenMain :: MVar String -> MVar () ->  Bot ()
+listenMain mv dead = do
+    mbDead <- liftIO . tryTakeMVar $ dead
+    case mbDead of
+      Just _ -> do putLogWarning "Thread listener died; restarting..."
+                   liftIO $ threadDelay 1000000
+                   connectAndListen
+      Nothing -> do mbLine <-  liftIO . tryTakeMVar $ mv
+                    case mbLine of
+                      Just s -> do putLogInfo $ "< " ++ s
+                                   handleLine s
+                      Nothing -> liftIO $ threadDelay 100000
+                    runTimers
+                    listenMain mv dead
 
--- | Startup. We should already have initialised global variables about the server and nick from the config, and we use those to connect to the server.
--- Then initialise callbacks, start the listening loop and signal a 'Startup' event.
-startBot :: Bot ()
-startBot = do
+-- | We should already have initialised global variables about the server and nick
+-- from the config, and we use those to connect to the server. Then start the
+-- listening loop and signal a 'Connected' event.
+connectAndListen :: Bot ()
+connectAndListen = do
     host <- getGlobal' serverHostname
     port <- getGlobal' serverPort
     h <- liftIO $ connectTo host . PortNumber . fromInteger $ port
     liftIO $ hSetBuffering h LineBuffering
     setGlobal socketH h
 
-    mapM_ addCallback S.callbacks
-
     mv <- liftIO newEmptyMVar
-    liftIO . forkIO $ listenH h mv
+    deadListener <- liftIO newEmptyMVar
+    liftIO $ forkFinally (listenH h mv) (\_ -> putMVar deadListener ())
 
+    applyCallbacks Connected
+    listenMain mv deadListener
+
+
+-- | Initialised callbacks, signal a 'Startup' event, and then invoke
+-- 'connectAndListen'
+startBot :: Bot ()
+startBot = do
+    mapM_ addCallback S.callbacks
     applyCallbacks Startup
-    listenMain mv
+    connectAndListen

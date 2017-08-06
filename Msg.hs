@@ -55,6 +55,7 @@ data SEvent
     | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
     | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
     | Startup
+    | Connected
     deriving Show
 
 -- | Sender field - can be either user or server.

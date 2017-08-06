@@ -30,7 +30,7 @@ import Scripts.Example
 
 -- | The list of callbacks the bot should try to apply.
 callbacks :: [SEvent -> Bot ()]
-callbacks = [ startup
+callbacks = [ connected
             , respondToPing
             , respondToChanMsg
             ]
