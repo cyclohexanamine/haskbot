@@ -50,7 +50,8 @@ module Bot (
     getGlobalFromStore, setGlobalToStore,
 
     -- * Re-exported for convenience
-    liftIO, liftM, mapM,
+    liftIO,
+    module Msg,
     ) where
 
 import Control.Monad (liftM, mapM_)
@@ -65,7 +66,7 @@ import Data.Char (isSpace)
 import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
-import Msg ( CMsg, SMsg, joinMsg )
+import Msg
 
 
 -- | Bot monad, having State GlobalStore and IO.

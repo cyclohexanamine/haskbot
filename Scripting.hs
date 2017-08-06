@@ -23,12 +23,10 @@ anywhere; 'Run' doesn't need to know about them, unlike the callbacks.
 
 module Scripting ( callbacks ) where
 
-import Msg ( CMsg(..), ClientCmd(..), SMsg(..), Sender(..), Recipient(..) )
-import Bot ( Bot, GlobalKey(..)
-           , botChan
-           , getGlobal, setGlobal
-           , writeMsg, putLogInfo
-           , runInS )
+import Bot ( Bot, SMsg )
+           
+import Scripts.Core
+import Scripts.Example
 
 -- | The list of callbacks the bot should try to apply.
 callbacks :: [SMsg -> Bot ()]
@@ -38,20 +36,4 @@ callbacks = [ respondToPing
             ]
 
 
-testCounter = GlobalKey (0::Int) "testCounter"
-
-respondToChanMsg :: SMsg -> Bot ()
-respondToChanMsg (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
-    do count <- getGlobal testCounter
-       setGlobal testCounter (count+1)
-       writeMsg $ CMsg PRIVMSG [show ch, "Echoing: " ++ text ++ " - " ++ show (count+1)]
-       runInS 4 . writeMsg $ CMsg PRIVMSG [show ch, "delayed action"]
-
-respondToPing :: SMsg -> Bot ()
-respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]
-
-respondTo376 :: SMsg -> Bot ()
-respondTo376 (SNumeric _ 376 _) = do
-    chan <- getGlobal botChan
-    writeMsg $ CMsg JOIN [chan]
 

@@ -27,10 +27,9 @@ import System.IO.Unsafe (unsafePerformIO)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Time.Clock (getCurrentTime)
 import Control.Exception (PatternMatchFail, evaluate, try)
-import Control.Concurrent
-import Control.Concurrent.MVar
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 
-import Msg
 import Bot
 import Scripting as S (callbacks)
 
