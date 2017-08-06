@@ -1,3 +1,5 @@
+{-# language GeneralizedNewtypeDeriving #-}
+
 {-|
 Module: Bot
 
@@ -21,19 +23,19 @@ by providing a way for users to specify arbitrary stateful variables, and
 share them across modules by exporting the keys.
 -}
 
-{-# language GeneralizedNewtypeDeriving #-}
 
 module Bot (
     -- * The Bot monad
-    Bot(..), runBot, Bot.empty,
+    Bot(..), runBot,
 
     -- * Global storage
-    getGlobal, setGlobal,
+    PersistentKey(..),
+    getGlobal, setGlobal, getGlobal', setGlobal',
     -- ** Bot-specific keys for global store
     -- $configkey
-    serverHostname, serverPort, botNick, botChan, logDest, configKeys,
+    serverHostname, serverPort, botNick, botChan, logDest,
     -- $mainkey
-    socketH, callbackList,
+    socketH, callbackList, configFile,
     -- $other
     timerList,
 
@@ -48,29 +50,27 @@ module Bot (
     -- ** Logging
     putLog, putLogInfo, putLogWarning, putLogError,
 
-    -- * Global storage implementation
-    GlobalStore(..), GlobalKey(..),
-    getGlobalFromStore, setGlobalToStore,
-
     -- * Re-exported for convenience
     liftIO,
-    module Msg,
+    module Msg, module Store
     ) where
 
 import Control.Monad (liftM, mapM_)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.State.Strict (MonadState, get, put)
 import Control.Monad.Trans.State.Strict (StateT, runStateT)
-import Data.Dynamic (Dynamic, fromDynamic, toDyn)
-import Data.Typeable (Typeable, TypeRep, typeOf)
-import Data.HashMap.Strict as M (HashMap, lookup, insert, empty)
 import Data.Time.Clock (UTCTime, getCurrentTime, addUTCTime)
 import Data.Char (isSpace)
+import Data.Ini as I (Ini(..), readIniFile, writeIniFile, lookupValue, unIni)
+import Data.Text (pack, unpack)
+import Data.HashMap.Lazy as M (lookupDefault, insert, empty)
 import Data.UUID (UUID)
 import Data.UUID.V4 (nextRandom)
 import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
+import Network (PortNumber)
 
+import Store
 import Msg
 
 
@@ -82,9 +82,6 @@ newtype Bot a = Bot {
 -- | Extract the IO computation by running the bot on the given initial state.
 runBot :: Bot a -> GlobalStore -> IO a
 runBot b = liftM fst . runStateT (getBot b)
-
--- | An empty GlobalStore.
-empty = M.empty :: GlobalStore
 
 
 -- | Get the value at k in the state.
@@ -119,7 +116,7 @@ joinChannels = mapM_ (\c -> writeMsg $ CMsg JOIN [c])
 putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
           -> String -- ^ Line
           -> Bot ()
-putLog lvl s = do logFile <- getGlobal logDest
+putLog lvl s = do logFile <- getGlobal' logDest
                   timestamp <- liftIO getCurrentTime
                   let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
                   liftIO . putStrLn $ s
@@ -184,19 +181,19 @@ timerList = GlobalKey [] "timerList" :: GlobalKey [(CallbackHandle, UTCTime, Bot
 {- $configkey __To be initialised in config:__
     The key strings here map to the relevant keys in .ini, as "SECTION.key": -}
 -- | IRC server host
-serverHostname = GlobalKey undefined "SERVER.hostname" :: GlobalKey String
+serverHostname = CacheKey undefined "SERVER" "hostname" :: PersistentKey String
 -- | IRC server port.
-serverPort = GlobalKey undefined "SERVER.port" :: GlobalKey String
+serverPort = CacheKey undefined "SERVER" "port" :: PersistentKey Integer
 -- | Nick of bot.
-botNick = GlobalKey undefined "BOT.nick" :: GlobalKey String
+botNick = CacheKey undefined "BOT" "nick" :: PersistentKey String
 -- | Channel that bot should join.
-botChan = GlobalKey undefined "BOT.chan" :: GlobalKey String
+botChan = CacheKey undefined "BOT" "chan" :: PersistentKey String
 -- | Logging output filename.
-logDest = GlobalKey undefined "LOG.logfile" :: GlobalKey String
--- | A list of the above keys.
-configKeys = [serverHostname, serverPort, botNick, botChan, logDest]
+logDest = CacheKey undefined "LOG" "logfile" :: PersistentKey String
 
 {- $mainkey __To be initialised elsewhere before running ('Run.startBot'):__ -}
+-- | Config file filename.
+configFile = GlobalKey undefined "configFile" :: GlobalKey String
 -- | Socket handle
 socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
 -- | List of callbacks to apply to messages
@@ -204,33 +201,62 @@ callbackList = GlobalKey [] "callbacks" :: GlobalKey [(CallbackHandle, SEvent ->
 
 -- Store-specific
 
--- | Store for keeping global state of arbitrary type. It has keys of type
--- @(TypeRep, String)@, allowing for uniqueness for keys of the same type
--- and guaranteeing that keys of different types will never collide.
--- It stores values as @Dynamic@, extracting them using the type information
--- provided by the key.
-type GlobalStore = M.HashMap (TypeRep, String) Dynamic
-
--- | Key for GlobalStore - a is the type that's stored. @GlobalKey a s@
--- creates a global key with:
+-- | @PersistentKey a sec name@ creates a key that transparently reads/writes
+-- a value to the config file, as a value called @name@ in section @sec@.
 --
--- * default value @a@ (which also specifies the type of the value being stored)
--- * id string @s@ (which should be unique for keys of the same type)
-data GlobalKey a = GlobalKey a String
+-- @CacheKey a sec name@ does the same, but also acts as an instance of
+-- @GlobalKey a (sec ++ "." ++ name)@; only reading the value from file once,
+-- storing the value in the store in memory and reading from that subequently.
+-- It does write to the file for every new value, though.
+--
+-- The objects referred to must have 'Eq', 'Read' and 'Show' instances for this.
+data PersistentKey a
+    = PersistentKey a String String
+    | CacheKey a String String
+    deriving (Read, Show, Eq)
 
--- | Look up the key in the store, returning the value found if there is one,
--- or the default value contained in the key otherwise.
-getGlobalFromStore :: Typeable a => GlobalStore -> GlobalKey a -> a
-getGlobalFromStore st (GlobalKey def s) =
-    case M.lookup (typeOf def, s) st >>= fromDynamic of
-      Just x -> x
-      Nothing -> def
+toGlobalKey (CacheKey d s n) = GlobalKey d $ s ++ "." ++ n
+toPersKey (CacheKey d s n) = PersistentKey d s n
 
--- | Set the given value to the key in the store.
-setGlobalToStore :: Typeable a => GlobalStore -> GlobalKey a -> a -> GlobalStore
-setGlobalToStore st (GlobalKey def s) val = M.insert k v st
-    where k = (typeOf def, s)
-          v = toDyn val
+-- | 'getGlobal', but for 'PersistentKey'. This is a separate function because
+-- the typeclass restrictions are stronger than 'getGlobal'.
+getGlobal' :: (Eq a, Read a, Show a, Typeable a) => PersistentKey a -> Bot a
+getGlobal' (PersistentKey def sec nm) = do
+    cfg <- getGlobal configFile
+    iniE <- liftIO $ I.readIniFile cfg
+    case iniE >>= lookupValue (pack sec) (pack nm) of
+      Left err -> return def
+      Right t -> do
+        return (read . unpack $ t)
+getGlobal' k@(CacheKey _ _ _) = do
+    st <- get
+    let gk = toGlobalKey k
+    if isInStore st gk
+        then getGlobal gk
+        else do
+          v <- getGlobal' . toPersKey $ k
+          setGlobal gk v
+          return v
+
+-- | 'setGlobal', but for 'PersistentKey'. This is a separate function because
+-- the typeclass restrictions are stronger than 'setGlobal'.
+setGlobal' :: (Eq a, Read a, Show a, Typeable a) => PersistentKey a -> a -> Bot ()
+setGlobal' (PersistentKey def sec nm) v = do
+    cfg <- getGlobal configFile
+    iniE <- liftIO $ I.readIniFile cfg
+    case iniE of
+      Right ini -> do
+        let newSec = M.insert (pack nm) (pack . show $ v) . M.lookupDefault M.empty (pack sec) $ I.unIni ini
+        let newIni = I.Ini . M.insert (pack sec) newSec . I.unIni $ ini
+        liftIO $ I.writeIniFile cfg newIni
+      Left err -> error err
+setGlobal' k@(CacheKey _ _ _) v = do
+    let gk = toGlobalKey k
+    oldV <- getGlobal gk
+    if oldV == v
+      then return ()
+      else  do setGlobal gk v
+               setGlobal' (toPersKey k) v
 
 
 -- Misc utility

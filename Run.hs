@@ -90,9 +90,9 @@ listenMain mv = do
 -- Then initialise callbacks, start the listening loop and signal a 'Startup' event.
 startBot :: Bot ()
 startBot = do
-    host <- getGlobal serverHostname
-    port <- getGlobal serverPort
-    h <- liftIO $ connectTo host . PortNumber . fromIntegral $ (read port :: Int)
+    host <- getGlobal' serverHostname
+    port <- getGlobal' serverPort
+    h <- liftIO $ connectTo host . PortNumber . fromInteger $ port
     liftIO $ hSetBuffering h LineBuffering
     setGlobal socketH h
 
