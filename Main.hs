@@ -1,14 +1,14 @@
 {-| module: Main
 
 Top-level module for the bot. Deals with command-line arguments,
-loading the config, and initialising the bot state.
+and starting the bot.
 -}
 
 module Main  (
-    -- * Command line options
-    Flag(..), parseCmdArgs,
     -- * Main
     main,
+    -- * Command line options
+    Flag(..), parseCmdArgs,
     ) where
 
 import Data.Ini as I (Ini, readIniFile, lookupValue)
@@ -46,6 +46,8 @@ parseCmdArgs =  do
       else return . Right . head $ configs
   where header = "Usage: haskbot -c configfile [-h]"
 
+-- | Get the command line arguments, initialise the bot state with the location
+-- of the config file, and start the bot.
 main :: IO ()
 main = do
     parsed <- parseCmdArgs

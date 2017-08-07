@@ -59,6 +59,7 @@ setGlobalToStore st (GlobalKey def s) val = M.insert k v st
     where k = (typeOf def, s)
           v = toDyn val
 
+-- | Check whether the given key is in the given store.
 isInStore :: Typeable a => GlobalStore -> GlobalKey a -> Bool
 isInStore st (GlobalKey def s) = member (typeOf def, s) st
 

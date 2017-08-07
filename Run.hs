@@ -9,8 +9,9 @@ we will invoke all functions in there that successfully pattern match the
 message.
 
 Support for non-blocking calls on Windows is poor, so we implement our own
-non-blocking, using a listener thread that blocks, and an MVar between that
-and the main thread. We can do non-blocking reads on the MVar reliably.
+non-blocking socket reads using a listener thread that blocks ('listenH')
+and an MVar between that and the main thread ('listenMain').
+We can do non-blocking reads on the MVar reliably.
 -}
 
 
@@ -113,8 +114,8 @@ connectAndListen = do
     listenMain mv deadListener
 
 
--- | Initialised callbacks, signal a 'Startup' event, and then invoke
--- 'connectAndListen'
+-- | Initialise callbacks, signal a 'Startup' event, and then invoke
+-- 'connectAndListen'.
 startBot :: Bot ()
 startBot = do
     mapM_ addCallback S.callbacks
