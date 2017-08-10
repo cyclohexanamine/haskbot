@@ -56,15 +56,16 @@ data SEvent
     | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
     | Startup
     | Connected
-    deriving Show
+    deriving (Show, Read, Eq)
 
 -- | Sender field - can be either user or server.
 data Sender = SUser { nick :: String, user :: String, host :: String }
             | SServer { host :: String }
-    deriving Show
+    deriving  (Show, Read, Eq)
 
 -- | Recipient field - can either be user or channel.
 data Recipient = RUser String | RChannel String
+    deriving (Read, Eq)
 instance Show Recipient where
     show (RUser r) = r
     show (RChannel c) = "#" ++ c

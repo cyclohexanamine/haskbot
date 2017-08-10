@@ -27,13 +27,14 @@ import Bot ( Bot, SEvent )
 
 import Scripts.Core
 import Scripts.Example
+import qualified Scripts.Vote as V
 
 -- | The list of callbacks the bot should try to apply.
 callbacks :: [SEvent -> Bot ()]
 callbacks = [ connected
             , respondToPing
-            , respondToChanMsg
-            ]
+            -- , respondToChanMsg
+            ] ++ V.callbacks
 
 
 
