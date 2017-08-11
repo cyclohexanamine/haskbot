@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-| module: Msg
 
 Defines the internal message/event structure, and implements parsing/serialising.
@@ -30,6 +31,7 @@ import Text.ParserCombinators.Parsec
 import Text.Parsec.Prim (parserFail)
 import Text.Read (readMaybe)
 import Data.List (intercalate)
+import Msghelp
 
 -- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.
@@ -54,6 +56,10 @@ data SEvent
     | SNotice { from :: Sender, to :: Recipient, text :: String }
     | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
     | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
+    | SJoin { from :: Sender, to :: Recipient }
+    | SPart { from :: Sender, to :: Recipient }
+    | SKick { from :: Sender, to :: Recipient, target :: String, reason :: String }
+    | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: String }
     | Startup
     | Connected
     deriving (Show, Read, Eq)
@@ -85,19 +91,18 @@ parseMsg = do src <- optionMaybe $ parseSender
               cmd <- parseWord
               args <- parseArgs
               case cmd of
-                   "PING" -> if length args > 0 then return . SPing . head $ args
-                                                else parserFail $ "PING had no arguments"
-                   "NOTICE" -> makeTextMsg SNotice src args
-                   "PRIVMSG" -> makeTextMsg SPrivmsg src args
+                   "PING"    -> if length args > 0 then return . SPing . head $ args
+                                                   else parserFail $ "PING had no arguments"
+                   "JOIN"    -> $(makeNMsg 0) SJoin src args
+                   "PART"    -> $(makeNMsg 0) SPart src args
+                   "MODE"    -> $(makeNMsg 1) SMode src args
+                   "NOTICE"  -> $(makeNMsg 1) SNotice src args
+                   "PRIVMSG" -> $(makeNMsg 1) SPrivmsg src args
+                   "KICK"    -> $(makeNMsg 2) SKick src args
                    _ -> case (readMaybe cmd :: Maybe Int) of
                             Just n -> return . SNumeric src n $ args
                             Nothing -> parserFail $ "Unexpected command " ++ cmd
-    where makeTextMsg con s a = case s of
-            Nothing -> parserFail "No source for textual message"
-            Just sender -> if length a /= 2 then parserFail "Too many arguments to textual message"
-                            else case parse parseRecipient "" (a!!0) of
-                                    Left err -> parserFail . show $ err
-                                    Right recipient -> return $ con sender recipient (a!!1)
+
 
 -- | Parse until one of the characters in @s@, or @eof@.
 parseUntil :: String -> Parser String

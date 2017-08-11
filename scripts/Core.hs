@@ -27,9 +27,10 @@ connected (Connected) = do
 -- | Join channels on 376 (end of MOTD), and then unhook this callback.
 respondTo376 :: SEvent -> Bot ()
 respondTo376 (SNumeric _ 376 _) = do
-    chan <- getGlobal' botChan
-    joinChannels [chan]
     getGlobal handle376 >>= removeCallback
+    chans <- getGlobal' autoJoinList
+    if length chans == 0 then return ()
+    else joinChannels ["#"++c | RChannel c <- chans]
 
 -- | Respond to a server PING with PONG.
 respondToPing :: SEvent -> Bot ()
@@ -37,8 +38,8 @@ respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]
 
 
 -- Channel management
-data ChannelData = ChannelData Recipient [Recipient] Bool -- ^ Channel, users, joined
-currChanList = GlobalKey [] "chanList" :: GlobalKey [ChannelData]
-autoJoinList = CachedKey [] "BOT" "autoJoinList" :: PersistentKey [Recipient]
+currChanList = GlobalKey [] "chanList" :: GlobalKey [Recipient]
+autoJoinList = CacheKey [] "BOT" "autoJoinList" :: PersistentKey [Recipient]
 
+-- respondToJoin (SJoin ch) = 
 
