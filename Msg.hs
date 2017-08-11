@@ -65,11 +65,7 @@ data Sender = SUser { nick :: String, user :: String, host :: String }
 
 -- | Recipient field - can either be user or channel.
 data Recipient = RUser String | RChannel String
-    deriving (Read, Eq)
-instance Show Recipient where
-    show (RUser r) = r
-    show (RChannel c) = "#" ++ c
-
+    deriving (Show, Read, Eq)
 
 -- | Convert a message to a string in the IRC format.
 joinMsg :: CMsg -> String
