@@ -37,7 +37,7 @@ module Bot (
     -- $mainkey
     socketH, callbackList, configFile,
     -- $other
-    timerList,
+    timerList, currChanList, autoJoinList,
 
     -- * Callback control
     CallbackHandle(..),
@@ -179,6 +179,10 @@ runInS s cb = do currTime <- liftIO getCurrentTime
 {- $other __Already initialised__ -}
 -- | List of timed callbacks, to be called at the time specified.
 timerList = GlobalKey [] "timerList" :: GlobalKey [(CallbackHandle, UTCTime, Bot ())]
+-- | Channels the bot is currently in.
+currChanList = GlobalKey [] "chanList" :: GlobalKey [Recipient]
+-- | Channels the bot should autojoin.
+autoJoinList = CacheKey [] "BOT" "autoJoinList" :: PersistentKey [Recipient]
 
 {- $configkey __To be initialised in config:__
     The key strings here map to the relevant keys in .ini, as "SECTION.key": -}

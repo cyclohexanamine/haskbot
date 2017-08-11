@@ -25,16 +25,12 @@ module Scripting ( callbacks ) where
 
 import Bot ( Bot, SEvent )
 
-import Scripts.Core
-import Scripts.Example
+import qualified Scripts.Core as C
 import qualified Scripts.Vote as V
+import Scripts.Example
 
 -- | The list of callbacks the bot should try to apply.
 callbacks :: [SEvent -> Bot ()]
-callbacks = [ connected
-            , respondToPing
-            -- , respondToChanMsg
-            ] ++ V.callbacks
-
-
-
+callbacks = concat [ C.callbacks
+                   , V.callbacks
+                   ]

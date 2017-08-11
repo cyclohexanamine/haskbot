@@ -6,12 +6,29 @@ responding to pings, joining and leaving channels, and so on.
 -}
 
 module Scripts.Core (
+    callbacks,
     -- * Connection
     connected, respondTo376,
+    -- * Channel management
+    respondToJoin, respondToPart, respondToKick,
     -- * Other
     respondToPing,
     ) where
 import Bot
+
+import Data.List (delete)
+
+-- | Event hooks
+callbacks = [ connected
+            , respondTo376
+            
+            , respondToPing
+            
+            , respondToJoin
+            , respondToPart
+            , respondToKick
+            ]
+
 
 
 handle376 = GlobalKey undefined "handle376" :: GlobalKey CallbackHandle
@@ -38,8 +55,24 @@ respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]
 
 
 -- Channel management
-currChanList = GlobalKey [] "chanList" :: GlobalKey [Recipient]
-autoJoinList = CacheKey [] "BOT" "autoJoinList" :: PersistentKey [Recipient]
 
--- respondToJoin (SJoin ch) = 
+-- | If it's the bot that's joined, update the current channels list.
+respondToJoin (SJoin (SUser nick _ _) ch@(RChannel _)) = do
+    ownNick <- getGlobal' botNick
+    if nick /= ownNick then return ()
+    else getGlobal currChanList >>= setGlobal currChanList . (++[ch]) 
+         >> putLogInfo ("Joined " ++ show ch)
+    
+-- | If it's the bot that's parted, update the current channels list.
+respondToPart (SPart (SUser nick _ _) ch@(RChannel _)) = do
+    ownNick <- getGlobal' botNick
+    if nick /= ownNick then return ()
+    else getGlobal currChanList >>= setGlobal currChanList . delete ch
+         >> putLogInfo ("Parted " ++ show ch)
 
+-- | If it's the bot that's been kicked, update the current channels list.
+respondToKick e@(SKick (SUser nick _ _) ch@(RChannel _) target reason) = do
+    ownNick <- getGlobal' botNick
+    if target /= ownNick then return ()
+    else getGlobal currChanList >>= setGlobal currChanList . delete ch
+         >> putLogInfo ("Kicked from "++(show ch)++" by " ++ nick ++ ": " ++ reason)
