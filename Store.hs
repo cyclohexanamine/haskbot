@@ -45,20 +45,22 @@ empty = M.empty :: GlobalStore
 -- * id string @s@ (which should be unique for keys of the same type)
 data GlobalKey a = GlobalKey a String
 
+-- | Convenience function for converting 'GlobalKey' to '(TypeRep, String)'.
+makeK :: Typeable a => GlobalKey a -> (TypeRep, String)
+makeK (GlobalKey def s) = (typeOf def, s)
+
 -- | Look up the key in the store, returning the value found if there is one,
 -- or the default value contained in the key otherwise.
 getGlobalFromStore :: Typeable a => GlobalStore -> GlobalKey a -> a
-getGlobalFromStore st (GlobalKey def s) =
-    case M.lookup (typeOf def, s) st >>= fromDynamic of
+getGlobalFromStore st k@(GlobalKey def _) =
+    case M.lookup (makeK k) st >>= fromDynamic of
       Just x -> x
       Nothing -> def
 
 -- | Set the given value to the key in the store.
 setGlobalToStore :: Typeable a => GlobalStore -> GlobalKey a -> a -> GlobalStore
-setGlobalToStore st (GlobalKey def s) val = M.insert k v st
-    where k = (typeOf def, s)
-          v = toDyn val
+setGlobalToStore st k val = M.insert (makeK k) (toDyn val) st
 
 -- | Check whether the given key is in the given store.
 isInStore :: Typeable a => GlobalStore -> GlobalKey a -> Bool
-isInStore st (GlobalKey def s) = member (typeOf def, s) st
+isInStore st k = member (makeK k) st

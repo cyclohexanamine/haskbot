@@ -93,15 +93,12 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
     else if host `elem` thisL then sendMessage ch $ "You've already voted "++(fst choiceNames)++
                                                     ", "++nick++". Your vote is unaffected."
     else if host `elem` otherL then do
-        let thisL' = thisL ++ [host]
-        let otherL' = delete host otherL
-        setGlobal' (fst choices) thisL'
-        setGlobal' (snd choices) otherL'
+        setGlobal' (fst choices) $ thisL ++ [host]
+        setGlobal' (snd choices) $ delete host otherL
         sendMessage ch $ "You've already voted "++(snd choiceNames)++", "++nick++
                          ". Your vote has been changed to "++(fst choiceNames)++"."
     else do
-        let thisL' = thisL ++ [host]
-        setGlobal' (fst choices) thisL'
+        setGlobal' (fst choices) $ thisL ++ [host]
         sendMessage ch $ "Your vote has been counted as "++(fst choiceNames)++", "++nick++"."
 
 -- | Return info about the current vote.

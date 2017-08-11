@@ -60,19 +60,19 @@ respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]
 respondToJoin (SJoin (SUser nick _ _) ch@(RChannel _)) = do
     ownNick <- getGlobal' botNick
     if nick /= ownNick then return ()
-    else getGlobal currChanList >>= setGlobal currChanList . (++[ch]) 
+    else modGlobal currChanList (++[ch]) 
          >> putLogInfo ("Joined " ++ show ch)
     
 -- | If it's the bot that's parted, update the current channels list.
 respondToPart (SPart (SUser nick _ _) ch@(RChannel _)) = do
     ownNick <- getGlobal' botNick
     if nick /= ownNick then return ()
-    else getGlobal currChanList >>= setGlobal currChanList . delete ch
+    else  modGlobal currChanList (delete ch)
          >> putLogInfo ("Parted " ++ show ch)
 
 -- | If it's the bot that's been kicked, update the current channels list.
 respondToKick e@(SKick (SUser nick _ _) ch@(RChannel _) target reason) = do
     ownNick <- getGlobal' botNick
     if target /= ownNick then return ()
-    else getGlobal currChanList >>= setGlobal currChanList . delete ch
+    else modGlobal currChanList (delete ch)
          >> putLogInfo ("Kicked from "++(show ch)++" by " ++ nick ++ ": " ++ reason)

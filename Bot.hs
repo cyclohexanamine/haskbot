@@ -30,10 +30,10 @@ module Bot (
 
     -- * Global storage
     PersistentKey(..),
-    getGlobal, setGlobal, getGlobal', setGlobal',
+    getGlobal, setGlobal, modGlobal, getGlobal', setGlobal', modGlobal',
     -- ** Bot-specific keys for global store
     -- $configkey
-    serverHostname, serverPort, botNick, botChan, logDest,
+    serverHostname, serverPort, botNick, logDest,
     -- $mainkey
     socketH, callbackList, configFile,
     -- $other
@@ -93,6 +93,11 @@ getGlobal k = do store <- get
 setGlobal :: Typeable a => GlobalKey a -> a -> Bot ()
 setGlobal k v = do store <- get
                    put $ setGlobalToStore store k v
+
+-- | Modify the value at k by f.
+modGlobal :: Typeable a => GlobalKey a -> (a -> a) -> Bot ()
+modGlobal k f = do v <- getGlobal k
+                   setGlobal k (f v)
 
 
 -- | Write a message out to the server.
@@ -192,8 +197,6 @@ serverHostname = CacheKey undefined "SERVER" "hostname" :: PersistentKey String
 serverPort = CacheKey undefined "SERVER" "port" :: PersistentKey Integer
 -- | Nick of bot.
 botNick = CacheKey undefined "BOT" "nick" :: PersistentKey String
--- | Channel that bot should join.
-botChan = CacheKey undefined "BOT" "chan" :: PersistentKey String
 -- | Logging output filename.
 logDest = CacheKey undefined "LOG" "logfile" :: PersistentKey String
 
@@ -262,6 +265,12 @@ setGlobal' k@(CacheKey _ _ _) v = do
       then return ()
       else  do setGlobal (toGlobalKey k) v
                setGlobal' (toPersKey k) v
+
+-- | 'modGlobal', but for 'PersistentKey'. This is a separate function because
+-- the typeclass restrictions are stronger than 'setGlobal'.
+modGlobal' :: (Eq a, Read a, Show a, Typeable a) => PersistentKey a -> (a -> a) -> Bot ()
+modGlobal' k f = do v <- getGlobal' k
+                    setGlobal' k (f v)
 
 
 -- Misc utility
