@@ -8,14 +8,32 @@ import Data.Maybe
 import Bot
 import Data.List
 
+-- | Event hooks
+callbacks = [ processCommand, onStartup ]
+
+-- Persistent values holding information about voting, the current vote, etc.
 voteChan = CacheKey (RChannel "") "VOTE" "voteChan"
 voteActive = CacheKey False "VOTE" "voteActive"
 voteOpts = CacheKey (VoteOpt Nothing Nothing Nothing Nothing) "VOTE" "voteOpts"
 yesHosts = CacheKey [] "VOTE" "yesHosts" :: PersistentKey [String]
 noHosts = CacheKey [] "VOTE" "noHosts" :: PersistentKey [String]
 
+-- | The commands a user can give in the channel.
 commandChar = '!'
-callbacks = [ processCommand ]
+commands = [ ("vote", vote)
+           , ("yes", castVote VYes)
+           , ("no", castVote VNo)
+           , ("voteinfo", voteInfo)
+           ]
+
+-- | Actions that can be voted on, and their vote lengths in seconds.
+acts = ["kick", "ban", "unban"]
+actl = [("kick", 5), ("ban", 3600), ("unban", 3600)]
+
+-- | Clear the current vote (for dev purposes).
+onStartup :: SEvent -> Bot ()
+onStartup Startup = do
+    setGlobal' voteActive False
 
 -- | Listen to all channel messages, and extract those which are
 -- commands for this bot.
@@ -31,44 +49,7 @@ processCommand ev@(SPrivmsg (SUser nick _ _) ch@(RChannel _) text)
     | otherwise
     = return ()
 
-
-commands = [ ("vote", vote)
-           , ("yes", castVote VYes)
-           , ("no", castVote VNo)
-           , ("voteinfo", voteInfo)
-           ]
-
-parseUntil' s = do x <- parseUntil s
-                   many $ oneOf s
-                   return x
-
-parseCommand :: Parser (SEvent -> Bot ())
-parseCommand = do cmd <- parseUntil' " "
-                  if cmd == ""
-                  then return $ \ev -> return ()
-                  else case lookup cmd commands of
-                         Just act -> return act
-                         Nothing -> return $ \ev -> do
-                            vc <- getGlobal' voteChan
-                            sendMessage vc $ "Invalid vote command '" ++ cmd ++ "'"
-
-data VoteOpt = VoteOpt { actionO :: Maybe String, targetO :: Maybe String, lenO :: Maybe Int, reasonO :: Maybe String }
-    deriving (Eq, Read, Show)
-parseVoteCmd :: Parser VoteOpt
-parseVoteCmd = do start <- parseUntil' " "
-                  action <- optionMaybe $ parseUntil' " "
-                  target <- optionMaybe $ parseUntil' " "
-                  reason <- optionMaybe $ parseUntil' "-"
-                  len <- optionMaybe . try $ do char 'l'
-                                                optionMaybe $ char ' '
-                                                decimal
-                  if start == "!vote"
-                  then return $ VoteOpt action target len reason
-                  else parserFail $ "Parse fail in parseVoteCmd - " ++ start
-
-acts = ["kick", "ban", "unban"]
-actl = [("kick", 5), ("ban", 3600), ("unban", 3600)]
-
+-- | !vote - command to start a vote.
 vote :: SEvent -> Bot ()
 vote (SPrivmsg usr ch text) = do
     isVote <- getGlobal' voteActive
@@ -84,6 +65,7 @@ vote (SPrivmsg usr ch text) = do
                          else do sendMessage ch $ "Starting vote to " ++ fromJust (actionO opt) ++ "."
                                  startVote opt
 
+-- | Start the given vote.
 startVote :: VoteOpt -> Bot ()
 startVote o@(VoteOpt (Just act) (Just targ) reasonMb lenMb) = do
     putLogInfo $ "Starting vote: " ++ show o
@@ -94,6 +76,8 @@ startVote o@(VoteOpt (Just act) (Just targ) reasonMb lenMb) = do
     setGlobal' voteOpts o
     setGlobal' voteActive True
 
+-- | !yes or !no - vote yes or no, checking the user's host to see if they've already
+-- voted.
 data VoteChoice = VYes | VNo
 castVote :: VoteChoice -> SEvent -> Bot ()
 castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
@@ -120,8 +104,10 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
         setGlobal' (fst choices) thisL'
         sendMessage ch $ "Your vote has been counted as "++(fst choiceNames)++", "++nick++"."
 
+-- | Return info about the current vote.
 voteInfo ev = return ()
 
+-- | End the current vote, taking the action if successful.
 voteEnd :: Bot ()
 voteEnd = do
     o <- getGlobal' voteOpts
@@ -129,4 +115,38 @@ voteEnd = do
     setGlobal' voteActive False
 
 
+-- Command parsing
 
+parseUntil' s = do x <- parseUntil s
+                   many $ oneOf s
+                   return x
+
+-- | Parse the top-level command, returning an action to take.
+parseCommand :: Parser (SEvent -> Bot ())
+parseCommand = do cmd <- parseUntil' " "
+                  if cmd == ""
+                  then return $ \ev -> return ()
+                  else case lookup cmd commands of
+                         Just act -> return act
+                         Nothing -> return $ \ev -> do
+                            vc <- getGlobal' voteChan
+                            sendMessage vc $ "Invalid vote command '" ++ cmd ++ "'"
+
+-- | Vote options. Not all possible combinations are valid votes - they may have
+-- @Nothing@s for necessary fields.
+data VoteOpt = VoteOpt { actionO :: Maybe String, targetO :: Maybe String
+                       , lenO :: Maybe Int, reasonO :: Maybe String }
+    deriving (Eq, Read, Show)
+
+-- | Parse a !vote command, returning vote options.
+parseVoteCmd :: Parser VoteOpt
+parseVoteCmd = do start <- parseUntil' " "
+                  action <- optionMaybe $ parseUntil' " "
+                  target <- optionMaybe $ parseUntil' " "
+                  reason <- optionMaybe $ parseUntil' "-"
+                  len <- optionMaybe . try $ do char 'l'
+                                                optionMaybe $ char ' '
+                                                decimal
+                  if start == "!vote"
+                  then return $ VoteOpt action target len reason
+                  else parserFail $ "Parse fail in parseVoteCmd - " ++ start

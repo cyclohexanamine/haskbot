@@ -34,3 +34,11 @@ respondTo376 (SNumeric _ 376 _) = do
 -- | Respond to a server PING with PONG.
 respondToPing :: SEvent -> Bot ()
 respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]
+
+
+-- Channel management
+data ChannelData = ChannelData Recipient [Recipient] Bool -- ^ Channel, users, joined
+currChanList = GlobalKey [] "chanList" :: GlobalKey [ChannelData]
+autoJoinList = CachedKey [] "BOT" "autoJoinList" :: PersistentKey [Recipient]
+
+

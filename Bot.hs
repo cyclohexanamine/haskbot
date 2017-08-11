@@ -253,11 +253,10 @@ setGlobal' (PersistentKey def sec nm) v = do
         liftIO $ I.writeIniFile cfg newIni
       Left err -> error err
 setGlobal' k@(CacheKey _ _ _) v = do
-    let gk = toGlobalKey k
-    oldV <- getGlobal gk
+    oldV <- getGlobal' k
     if oldV == v
       then return ()
-      else  do setGlobal gk v
+      else  do setGlobal (toGlobalKey k) v
                setGlobal' (toPersKey k) v
 
 
