@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-| module: Bot.Msg
 
-Defines the internal message/event structure, and implements parsing/serialising.
+Defines the internal message\/event structure, and implements parsing\/serialising.
 
 Server events are either messages that the bot has received from the server, like
 a PRIVMSG, or other events like the bot starting up. They're parsed from the
@@ -14,6 +14,9 @@ within a callback. Client messages can be sent generically, as a stock 'CMsg'.
 
 module Bot.Msg (
     -- * Message structure
+    -- ** Generic
+    User(..), Channel(..), Server(..), SenderC, RecipientC,
+    fromS, fromR, toR,
     -- ** Event
     SEvent(..), Sender(..), Recipient(..),
     -- ** Client message
@@ -33,9 +36,45 @@ import Text.Read (readMaybe)
 import Data.List (intercalate)
 import Bot.Msg.Splices
 
+
+-- | A user with a nickname, and maybe user\/host.
+data User = User { nick :: String, user :: Maybe String, host :: Maybe String } deriving (Eq, Read, Show)
+-- | A channel; the string doesn't include the '#' prefix.
+newtype Channel = Channel String deriving (Eq, Read, Show)
+-- | A server and its hostname.
+newtype Server = Server String deriving (Eq, Read, Show)
+
+-- | Recipient class: 'User' and 'Channel' can both be recipients
+-- in a message (see 'Recipient').
+class RecipientC a where
+    -- | 'Recipient' to 'User' or 'Channel'
+    fromR :: Recipient -> a
+    -- ^ 'User' or 'Channel' to 'Recipient'
+    toR :: a -> Recipient
+instance RecipientC User where
+    fromR (RUser n) = User n Nothing Nothing
+    toR (User n _ _) = RUser n
+instance RecipientC Channel where
+    fromR (RChannel c) = Channel c
+    toR (Channel c) = RChannel c
+instance RecipientC Recipient where
+    fromR = id
+    toR = id
+
+-- | Sender class: 'User' and 'Server' can both be senders
+-- in a message (see 'Sender').
+class SenderC a where
+    -- | 'Sender' to 'User' or 'Server'
+    fromS :: Sender -> a
+instance SenderC User where
+    fromS (SUser n u h) = User n (Just u) (Just h)
+instance SenderC Server where
+    fromS (SServer h) = Server h
+
+
 -- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.
-data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG
+data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS
     deriving Show
 
 -- | Message that will be sent by the bot. The structure is fairly barebones
@@ -65,8 +104,8 @@ data SEvent
     deriving (Show, Read, Eq)
 
 -- | Sender field - can be either user or server.
-data Sender = SUser { nick :: String, user :: String, host :: String }
-            | SServer { host :: String }
+data Sender = SUser String String String -- ^ nick, user, host
+            | SServer String -- ^ host
     deriving  (Show, Read, Eq)
 
 -- | Recipient field - can either be user or channel.

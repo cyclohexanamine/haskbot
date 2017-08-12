@@ -36,7 +36,7 @@ module Bot (
     -- $mainkey
     socketH, callbackList, configFile,
     -- $other
-    timerList, currChanList, autoJoinList,
+    timerList, currChanList, autoJoinList, nameCallbacks, whoisCallbacks,
 
     -- * Callback control
     CallbackHandle(..),
@@ -45,12 +45,16 @@ module Bot (
 
     -- * IO
     -- ** Messaging
-    writeMsg, sendMessage, joinChannels,
+    writeMsg, sendMessage,
+    -- * Queries
+    getWhois, getWhowas, getNames,
+    -- * Channel management
+    joinChannels,
     -- ** Logging
     putLog, putLogInfo, putLogWarning, putLogError,
 
     -- * Re-exported for convenience
-    liftIO,
+    liftIO, rstrip,
     module Bot.Msg, module Bot.Store
     ) where
 
@@ -107,15 +111,42 @@ writeMsg msg = do let msgString = joinMsg msg
                   putLogInfo $ "> " ++ rstrip msgString
 
 -- | Send a textual message to the recipient
-sendMessage :: Recipient -> String -> Bot ()
+sendMessage :: RecipientC a => a -> String -> Bot ()
 sendMessage r t = writeMsg $ CMsg PRIVMSG [rs, t]
-    where rs = case r of RUser s -> s
-                         RChannel c -> "#" ++ c
+    where rs = case (toR r) of RUser s -> s
+                               RChannel c -> "#" ++ c
 
 -- | Join the list of channels, where each element is a channel name string (e.g.,
 -- @"#channame"@)
-joinChannels :: [String] -> Bot ()
-joinChannels = mapM_ (\c -> writeMsg $ CMsg JOIN [c])
+joinChannels :: [Channel] -> Bot ()
+joinChannels = mapM_ (\(Channel c) -> writeMsg . CMsg JOIN $ ["#"++c])
+
+-- | List of callbacks for active NAME queries, to be invoked when
+-- the server replies.
+nameCallbacks = GlobalKey [] "nameCallbacks" :: GlobalKey [(String, [User] -> Bot ())]
+-- | Make a NAME query (list of nicks in the channel) for the given channel,
+-- invoking the callback when the server replies.
+getNames :: Channel -> ([User] -> Bot ()) -> Bot ()
+getNames (Channel ch) cb = do
+    modGlobal nameCallbacks (++[(ch, cb)])
+    writeMsg $ CMsg NAMES ["#"++ch]
+
+-- | List of callbacks for active WHOIS\/WHOWAS queries, to be invoked when
+-- the server replies.
+whoisCallbacks = GlobalKey [] "whoisCallbacks" :: GlobalKey [(String, Maybe User -> Bot ())]
+-- | Make a WHOIS query for the given user, invoking the callback when
+-- the server replies.
+getWhois :: User -> (Maybe User -> Bot ()) -> Bot ()
+getWhois (User nick _ _) cb = do
+    modGlobal whoisCallbacks (++[(nick, cb)])
+    writeMsg $ CMsg WHOIS [nick]
+
+-- | Make a WHOWAS query for the given user, invoking the callback when
+-- the server replies.
+getWhowas :: User -> (Maybe User -> Bot ()) -> Bot ()
+getWhowas (User nick _ _) cb = do
+    modGlobal whoisCallbacks (++[(nick, cb)])
+    writeMsg $ CMsg WHOWAS [nick]
 
 
 -- | Write a line out to the log, prepended with a timestamp.
@@ -184,9 +215,9 @@ runInS s cb = do currTime <- liftIO getCurrentTime
 -- | List of timed callbacks, to be called at the time specified.
 timerList = GlobalKey [] "timerList" :: GlobalKey [(CallbackHandle, UTCTime, Bot ())]
 -- | Channels the bot is currently in.
-currChanList = GlobalKey [] "chanList" :: GlobalKey [Recipient]
+currChanList = GlobalKey [] "chanList" :: GlobalKey [Channel]
 -- | Channels the bot should autojoin.
-autoJoinList = CacheKey [] "BOT" "autoJoinList" :: PersistentKey [Recipient]
+autoJoinList = CacheKey [] "BOT" "autoJoinList" :: PersistentKey [Channel]
 
 {- $configkey __To be initialised in config:__
     The key strings here map to the relevant keys in .ini, as "SECTION.key": -}
