@@ -19,7 +19,7 @@ import System.Console.GetOpt (ArgOrder(..), OptDescr(..), ArgDescr(..), getOpt, 
 import System.Environment (getArgs)
 
 import Bot (GlobalStore, GlobalKey(..), empty, runBot, configFile, setGlobalToStore)
-import Run (startBot)
+import Bot.Run (startBot)
 
 -- | Command line flags
 data Flag

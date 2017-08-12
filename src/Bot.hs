@@ -52,7 +52,7 @@ module Bot (
 
     -- * Re-exported for convenience
     liftIO,
-    module Msg, module Store
+    module Bot.Msg, module Bot.Store
     ) where
 
 import Control.Monad (liftM, mapM_)
@@ -70,8 +70,8 @@ import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 import Network (PortNumber)
 
-import Store
-import Msg
+import Bot.Store
+import Bot.Msg
 
 
 -- | Bot monad, having State GlobalStore and IO.

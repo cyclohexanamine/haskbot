@@ -1,10 +1,10 @@
-{-| module: Scripts.Example
+{-| module: Bot.Scripting.Example
 
 Some example functionality for the bot.
 
 -}
 
-module Scripts.Example where
+module Bot.Scripting.Example where
 import Bot
 
 -- | Echo all channel messages, keeping count of the number of messages

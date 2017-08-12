@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-| module: Msg
+{-| module: Bot.Msg
 
 Defines the internal message/event structure, and implements parsing/serialising.
 
@@ -12,7 +12,7 @@ Client messages are messages that will be sent to the server by the bot, usually
 within a callback. Client messages can be sent generically, as a stock 'CMsg'.
 -}
 
-module Msg (
+module Bot.Msg (
     -- * Message structure
     -- ** Event
     SEvent(..), Sender(..), Recipient(..),
@@ -31,7 +31,7 @@ import Text.ParserCombinators.Parsec
 import Text.Parsec.Prim (parserFail)
 import Text.Read (readMaybe)
 import Data.List (intercalate)
-import Msghelp
+import Bot.Msg.Splices
 
 -- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.

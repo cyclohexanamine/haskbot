@@ -1,12 +1,12 @@
-module Scripts.Vote where
+module Bot.Scripting.Vote where
 
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Number
 import Text.Parsec.Prim (parserFail)
 import Data.Maybe
+import Data.List
 
 import Bot
-import Data.List
 
 -- | Event hooks
 callbacks = [ processCommand, onStartup ]

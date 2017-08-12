@@ -1,11 +1,11 @@
-{-| module: Scripts.Core
+{-| module: Bot.Scripting.Core
 
 Implements the core IRC-related functionality, like user registration,
 responding to pings, joining and leaving channels, and so on.
 
 -}
 
-module Scripts.Core (
+module Bot.Scripting.Core (
     callbacks,
     -- * Connection
     connected, respondTo376,

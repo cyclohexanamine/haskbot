@@ -1,5 +1,5 @@
 {-|
-Module: Store
+Module: Bot.Store
 
 A store mapping keys to values of arbitrary type. 'GlobalStore' is a
 hashmap from @(String, TypeRep)@ pairs to @Dynamic@ objects; the keys used,
@@ -19,8 +19,8 @@ by providing a way for users to specify arbitrary stateful variables, and
 share them across modules by exporting the keys.
 -}
 
-module Store (
-    module Store,
+module Bot.Store (
+    module Bot.Store,
     Typeable,
     ) where
 

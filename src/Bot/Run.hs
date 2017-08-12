@@ -1,5 +1,5 @@
 {-|
-Module: Run
+Module: Bot.Run
 
 The main event logic for the bot. Implements the core networking
 functionality, as well as finding and applying callbacks.
@@ -15,7 +15,7 @@ We can do non-blocking reads on the MVar reliably.
 -}
 
 
-module Run (
+module Bot.Run (
     -- * Networking
     startBot, connectAndListen, listenMain, listenH,
     -- * Callback handling
@@ -32,7 +32,7 @@ import Control.Concurrent (forkFinally, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 
 import Bot
-import Scripting as S (callbacks)
+import Bot.Scripting as S (callbacks)
 
 
 -- Callbacks

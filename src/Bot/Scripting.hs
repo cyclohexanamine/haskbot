@@ -1,4 +1,4 @@
-{-| module: Scripting
+{-| module: Bot.Scripting
 
 Defines the callbacks that will be called on events. The bot /tries/ to apply
 all callbacks to all events, but will ignore any that fail to pattern-match
@@ -21,13 +21,13 @@ a stateful store of global variables. Callbacks can simply use keys defined
 anywhere; 'Run' doesn't need to know about them, unlike the callbacks.
 -}
 
-module Scripting ( callbacks ) where
+module Bot.Scripting ( callbacks ) where
 
 import Bot ( Bot, SEvent )
 
-import qualified Scripts.Core as C
-import qualified Scripts.Vote as V
-import Scripts.Example
+import qualified Bot.Scripting.Core as C
+import qualified Bot.Scripting.Vote as V
+import Bot.Scripting.Example
 
 -- | The list of callbacks the bot should try to apply.
 callbacks :: [SEvent -> Bot ()]

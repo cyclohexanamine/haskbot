@@ -1,11 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
-{- module: Msghelp
+{- module: Bot.Msg.Splices
 
 Helper splices for Msg - they need to be in a separate module due to
 TemplateHaskell constraints.
 -}
 
-module Msghelp where
+module Bot.Msg.Splices where
 
 import Language.Haskell.TH
 
