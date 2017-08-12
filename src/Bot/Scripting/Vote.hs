@@ -98,7 +98,7 @@ findTarget o@(VoteOpt (Just act) (Just targ) _ _ _) =
 startVote :: VoteOpt -> Bot ()
 startVote o@(VoteOpt (Just act) (Just targ) _ _ _) = do
     ch <- getGlobal' voteChan
-    sendMessage ch $ "Starting vote to " ++ fromJust (actionO o) ++ "."
+    sendMessage ch $ "Starting vote. " ++ formatVote o
     putLogInfo $ "Starting vote: " ++ show o
     let t = fromJust . lookup act $ actl
     runInS t voteEnd
@@ -109,6 +109,7 @@ startVote o@(VoteOpt (Just act) (Just targ) _ _ _) = do
 
 -- | A yes\/no vote.
 data VoteChoice = VYes | VNo
+
 -- | !yes or !no - vote yes or no, checking the user's host to see if they've already
 -- voted.
 castVote :: VoteChoice -> SEvent -> Bot ()
@@ -133,8 +134,30 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
         setGlobal' (fst choices) $ thisL ++ [host]
         sendMessage ch $ "Your vote has been counted as "++(fst choiceNames)++", "++nick++"."
 
--- | Return info about the current vote.
-voteInfo ev = return ()
+
+-- | Send info about the current vote.
+voteInfo (SPrivmsg (SUser nick _ host) c@(RChannel ch) _) = do
+    (Channel vc) <- getGlobal' voteChan
+    active <- getGlobal' voteActive
+    opts <- getGlobal' voteOpts
+    yesL <- getGlobal' yesHosts
+    noL <- getGlobal' noHosts
+    let countsS = "Votes are " ++ show (length yesL) ++ " for, " ++ show (length noL) ++ " against. "
+    let voteStr = "Vote currently active. " ++ formatVote opts ++ countsS
+    if ch /= vc then return ()
+    else if not active then sendMessage c "No vote currently taking place."
+    else sendMessage c voteStr
+
+-- | Pretty print a vote.
+formatVote :: VoteOpt -> String
+formatVote opts = start ++ actS ++ reasonS
+    where start = case targetO opts of Just target ->  target ++ " to be "
+                                       _ -> ""
+          actS = case actionO opts of Just act -> act ++ " "
+                                      _ -> "... "
+          reasonS = case reasonO opts of Just reason -> "for "++reason++". "
+                                         _ -> ". "
+
 
 
 -- | End the current vote, taking the action if successful.
