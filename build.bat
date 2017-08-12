@@ -1,6 +1,7 @@
 cd src
 ghc -o ../haskbot Main
-del /s /q /f *.hi
-del /s /q /f *.ho
-del /s /q /f *.o
+REM del /s /q /f *.hi
+REM del /s /q /f *.ho
+REM del /s /q /f *.o
 haddock -h -o ../docs Main
+cd ..

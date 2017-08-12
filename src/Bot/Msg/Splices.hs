@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-{- module: Bot.Msg.Splices
+{-| module: Bot.Msg.Splices
 
 Helper splices for Msg - they need to be in a separate module due to
 TemplateHaskell constraints.
@@ -10,7 +10,7 @@ module Bot.Msg.Splices where
 import Language.Haskell.TH
 
 -- | A splice for generating a function that helps parse a message of the format
--- @:<source> <command> <target> [<args>]@
+-- @:\<source> \<command> \<target> [\<args>]@
 -- where there are @n@ args. The function takes a constructor, which is applied to the source,
 -- target, and the arguments. For example:
 --

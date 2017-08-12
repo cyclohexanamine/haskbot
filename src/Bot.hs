@@ -1,7 +1,6 @@
 {-# language GeneralizedNewtypeDeriving #-}
 
-{-|
-Module: Bot
+{-| Module: Bot
 
 IRC bot monad, carrying around a state and IO. Most IRC-specific logic
 is implemented in other modules.
