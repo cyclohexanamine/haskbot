@@ -3,14 +3,16 @@
 The voting logic.
 -}
 module Bot.Scripting.Vote (
-    callbacks, voteChan,
+    callbacks, voteChan, actionSettings,
     -- * Vote data
-    VoteOpt(..),
+    VoteOpt(..), ActionSetting(..),
     -- * Command handling
-    processCommand, parseCommand, parseVoteCmd,
+    processCommand, parseCommand, validateVote, parseVoteCmd,
     -- * Voting logic
     vote, findTarget, startVote, voteEnd,
     VoteChoice(..), castVote, voteInfo,
+    -- * Helpers
+    showCurrVote, formatVote,
     ) where
 
 import Text.ParserCombinators.Parsec
@@ -19,36 +21,56 @@ import Text.Parsec.Prim (parserFail)
 import Data.Maybe
 import Data.List
 import Data.List.Split (splitOn)
+import Data.Time.Format
 
 import Bot
+
+
+-- | Vote options.
+data VoteOpt = VoteOpt { actionO :: ActionSetting, targetO :: String
+                       , lenO :: Either Char Integer, reasonO :: Maybe String
+                       , hostO :: Maybe String }
+    deriving (Eq, Read, Show)
+
+-- | Action setting struct - an action is something that can be voted on for
+-- the bot to carry out.
+data ActionSetting = ActionSetting { actAS :: String -- ^ The name of the action in the !vote command, e.g., "kick".
+                                   , actNameAS :: String -- ^ The name of the action as a verb, e.g., "kicked".
+                                   , voteLenAS :: Integer -- ^ The length of the vote, in seconds.
+                                   , voteThresholdAS :: Integer -- ^ The minimum number of votes that must be cast for the vote to pass.
+                                   , useHostAS :: Bool -- ^ Whether the action requires a hostname on the part of the target.
+                                   }
+    deriving (Eq, Read, Show)
+
+-- | Action settings for each action.
+actionSettings = PersistentKey [] "VOTE" "actionSettings" :: PersistentKey [ActionSetting]
+
+findAct act = getGlobal' actionSettings >>= return . find ((==act) . actAS)
+
 
 -- | Event hooks
 callbacks = [ processCommand, onStartup ]
 
 -- Persistent values holding information about voting, the current vote, etc.
--- | The channel the bot should conduct voting in.
+-- | The channel the bot should take votes in.
 voteChan = CacheKey (Channel "") "VOTE" "voteChan"
-voteActive = CacheKey False "VOTE" "voteActive"
-voteOpts = CacheKey (VoteOpt Nothing Nothing Nothing Nothing Nothing) "VOTE" "voteOpts"
+voteTimer = GlobalKey nilCH "voteTimer" :: GlobalKey CallbackHandle
+voteOpts = CacheKey Nothing "VOTE" "voteOpts" :: PersistentKey (Maybe VoteOpt)
 yesHosts = CacheKey [] "VOTE" "yesHosts" :: PersistentKey [String]
 noHosts = CacheKey [] "VOTE" "noHosts" :: PersistentKey [String]
 
--- | The commands a user can give in the channel.
 commandChar = '!'
+-- | The commands a user can give in the channel.
 commands = [ ("vote", vote)
            , ("yes", castVote VYes)
            , ("no", castVote VNo)
            , ("voteinfo", voteInfo)
            ]
 
--- | Actions that can be voted on, and their vote lengths in seconds.
-acts = ["kick", "ban", "unban"]
-actl = [("kick", 5), ("ban", 3600), ("unban", 3600)]
-
 -- | Clear the current vote (for dev purposes).
 onStartup :: SEvent -> Bot ()
 onStartup Startup = do
-    setGlobal' voteActive False
+    setGlobal' voteOpts Nothing
 
 -- | Listen to all channel messages, and extract those which are
 -- commands for this bot.
@@ -67,45 +89,41 @@ processCommand ev@(SPrivmsg (SUser _ _ _) ch@(RChannel _) text)
 -- | !vote - command to start a vote.
 vote :: SEvent -> Bot ()
 vote (SPrivmsg usr ch text) = do
-    isVote <- getGlobal' voteActive
-    if isVote then sendMessage ch "Vote already active"
-    else case parse parseVoteCmd "" text of
-            Left err -> putLogError . show $ err
-            Right opt -> if isNothing $ actionO opt
-                         then sendMessage ch "Need an action."
-                         else if not $ (fromJust . actionO $ opt) `elem` acts
-                         then sendMessage ch $ "'" ++ (fromJust . actionO $ opt) ++ "' is not a valid action."
-                         else if isNothing $ targetO opt
-                         then sendMessage ch "Need a target."
-                         else findTarget opt
+    currOptsMb <- getGlobal' voteOpts
+    newOptsMb <- validateVote (fromR ch) text
+    if isJust currOptsMb then sendMessage ch "Vote already active"
+    else case newOptsMb of
+            Just opts -> findTarget opts
+            Nothing  -> return ()
 
 -- | Look up the target - a whois\/whowas for kick\/banning, or checking if they're in the channel for a kick.
 findTarget :: VoteOpt -> Bot ()
-findTarget o@(VoteOpt (Just act) (Just targ) _ _ _) =
-    if act == "kick"
-    then getGlobal' voteChan >>= \c -> getNames c $ \namesL ->
-        if targ `elem` [n | (User n _ _) <- namesL] then startVote o
-                              else sendMessage c $ "Target '" ++ targ ++ "' not in channel."
-    else getWhois (User targ Nothing Nothing) $ \mbUser ->
+findTarget o =
+    if useHostAS . actionO $ o
+    then getWhois (User targ Nothing Nothing) $ \mbUser ->
         case mbUser of
           Just (User n _ (Just h)) -> startVote $ o { hostO = Just h }
           _ -> getWhowas (User targ Nothing Nothing) $ \mbUser ->
             case mbUser of
               Just (User n _ (Just h)) -> startVote $ o { hostO = Just h }
               _ -> getGlobal' voteChan >>= \c -> do sendMessage c $ "Can't find target '" ++ targ ++ "'."
+    else getGlobal' voteChan >>= \c -> getNames c $ \namesL ->
+        if targ `elem` [n | (User n _ _) <- namesL] then startVote o
+                              else sendMessage c $ "Target '" ++ targ ++ "' not in channel."
+  where targ = targetO o
 
 -- | Start the given vote.
 startVote :: VoteOpt -> Bot ()
-startVote o@(VoteOpt (Just act) (Just targ) _ _ _) = do
+startVote o = do
     ch <- getGlobal' voteChan
-    sendMessage ch $ "Starting vote. " ++ formatVote o
-    putLogInfo $ "Starting vote: " ++ show o
-    let t = fromJust . lookup act $ actl
-    runInS t voteEnd
+    let t = voteLenAS . actionO $ o
+    runInS t voteEnd >>= setGlobal voteTimer
     setGlobal' yesHosts []
     setGlobal' noHosts []
-    setGlobal' voteOpts o
-    setGlobal' voteActive True
+    setGlobal' voteOpts $ Just o
+    voteStr <- showCurrVote
+    sendMessage ch $ "Starting vote. " ++ voteStr
+    putLogInfo $ "Starting vote with options " ++ show o
 
 -- | A yes\/no vote.
 data VoteChoice = VYes | VNo
@@ -121,7 +139,7 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
                                      VNo -> ("no", "yes")
     thisL <- getGlobal' $ fst choices
     otherL <- getGlobal' $ snd choices
-    isVote <- getGlobal' voteActive
+    isVote <- getGlobal' voteOpts >>= return . isJust
     if (fromR ch) /= vChan || not isVote then return ()
     else if host `elem` thisL then sendMessage ch $ "You've already voted "++(fst choiceNames)++
                                                     ", "++nick++". Your vote is unaffected."
@@ -138,34 +156,46 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
 -- | Send info about the current vote.
 voteInfo (SPrivmsg (SUser nick _ host) c@(RChannel ch) _) = do
     (Channel vc) <- getGlobal' voteChan
-    active <- getGlobal' voteActive
-    opts <- getGlobal' voteOpts
+    optsMb <- getGlobal' voteOpts
     yesL <- getGlobal' yesHosts
     noL <- getGlobal' noHosts
     let countsS = "Votes are " ++ show (length yesL) ++ " for, " ++ show (length noL) ++ " against. "
-    let voteStr = "Vote currently active. " ++ formatVote opts ++ countsS
+    voteStr <- showCurrVote
+    let infoStr = "Vote currently active. " ++ voteStr ++ countsS
     if ch /= vc then return ()
-    else if not active then sendMessage c "No vote currently taking place."
-    else sendMessage c voteStr
+    else if isNothing optsMb then sendMessage c "No vote currently taking place."
+    else sendMessage c infoStr
+
+-- | Gets info about the current vote, including end time.
+showCurrVote :: Bot (String)
+showCurrVote = do
+    optsMb <- getGlobal' voteOpts
+    case optsMb of
+      Just opts -> do
+        endTime <- getGlobal voteTimer >>= getEndTime >>= \x->
+            case x of Just t -> return $ formatTime defaultTimeLocale "%c" t
+                      Nothing -> return ""
+        return $ formatVote opts ++ "Ending " ++ endTime ++ ". "
+      Nothing -> return ("")
 
 -- | Pretty print a vote.
 formatVote :: VoteOpt -> String
-formatVote opts = start ++ actS ++ reasonS
-    where start = case targetO opts of Just target ->  target ++ " to be "
-                                       _ -> ""
-          actS = case actionO opts of Just act -> act ++ " "
-                                      _ -> "... "
-          reasonS = case reasonO opts of Just reason -> "for "++reason++". "
+formatVote opts = startS ++ actS ++ reasonS
+    where startS = targetO opts ++ " to be "
+          actS = actNameAS (actionO opts)
+          reasonS = case reasonO opts of Just reason -> " for "++reason++". "
                                          _ -> ". "
-
 
 
 -- | End the current vote, taking the action if successful.
 voteEnd :: Bot ()
-voteEnd = do
-    o <- getGlobal' voteOpts
-    putLogInfo $ "Ending vote: " ++ show o
-    setGlobal' voteActive False
+voteEnd = getGlobal' voteOpts >>= \oMb -> case oMb of
+  Nothing -> return ()
+  Just opts -> do
+    putLogInfo $ "Ending vote: " ++ show opts
+    setGlobal' voteOpts Nothing
+    ch <- getGlobal' voteChan
+    kickUser ch . makeUser . targetO $ opts
 
 
 -- Command parsing
@@ -185,22 +215,37 @@ parseCommand = do cmd <- parseUntil' " "
                             vc <- getGlobal' voteChan
                             sendMessage vc $ "Invalid vote command '" ++ cmd ++ "'"
 
--- | Vote options. Not all possible combinations are valid votes - they may have
--- @Nothing@s for necessary fields.
-data VoteOpt = VoteOpt { actionO :: Maybe String, targetO :: Maybe String
-                       , lenO :: Maybe (Either Char Int), reasonO :: Maybe String
-                       , hostO :: Maybe String }
-    deriving (Eq, Read, Show)
-
--- | Parse a !vote command, returning vote options.
-parseVoteCmd :: Parser VoteOpt
+-- | Parser for a !vote command, returning parsed parameters if successful, or
+-- an error message to send to the channel if not.
+parseVoteCmd :: Parser (Either String (String, String, Maybe (Either Char Integer), Maybe String))
 parseVoteCmd = do start <- parseUntil' " "
                   action <- optionMaybe $ parseUntil' " "
                   target <- optionMaybe $ parseUntil' " "
                   reason <- optionMaybe $ parseUntil' "-" >>= return . rstrip
-                  len <- optionMaybe . try $ do char 'l'
-                                                optionMaybe $ char ' '
-                                                (char 'p' >>= return . Left) <|> (decimal >>= return . Right)
-                  if start == "!vote"
-                  then return $ VoteOpt action target len reason Nothing
-                  else parserFail $ "Parse fail in parseVoteCmd - " ++ start
+                  len <- optionMaybe $ do optionMaybe $ char '-'
+                                          char 'l'
+                                          optionMaybe $ char ' '
+                                          (char 'p' >>= return . Left) <|> (decimal >>= return . Right)
+                  if start /= "!vote"
+                  then parserFail $ "Parse fail in parseVoteCmd - " ++ start
+                  else if isNothing action
+                  then return $ Left "Need an action"
+                  else if isNothing target
+                  then return $ Left "Need a target."
+                  else return $ Right (fromJust action, fromJust target, len,  reason)
+
+-- | Parse a !vote command, sending the appropriate error messages, and returning
+-- the vote options if the command was valid, or Nothing if not.
+validateVote :: Channel -> String -> Bot (Maybe VoteOpt)
+validateVote ch text = do
+    case parse parseVoteCmd "" text of
+        Left err -> putLogError (show err) >> return Nothing
+        Right (Left msg) -> sendMessage ch msg >> return Nothing
+        Right (Right (act, targ, lenMb, reasonMb)) -> do
+            actSettingMb <- findAct act
+            case actSettingMb of
+                Nothing -> sendMessage ch ("'"++act++"' is not a valid action.") >> return Nothing
+                Just actSetting ->
+                    let len = case lenMb of Nothing -> Right (voteLenAS actSetting)
+                                            Just l -> l
+                    in return . Just $ VoteOpt actSetting targ len reasonMb Nothing

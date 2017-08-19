@@ -24,7 +24,6 @@ import Data.List.Split (splitOn)
 
 -- | Event hooks
 callbacks = [ connected
-            , respondToEndOfMOTD
 
             , respondToPing
 
@@ -38,7 +37,7 @@ callbacks = [ connected
 
 
 
-handle376 = GlobalKey undefined "handle376" :: GlobalKey CallbackHandle
+handle376 = GlobalKey nilCH "handle376" :: GlobalKey CallbackHandle
 
 -- | User registration, and set a callback to join channels.
 connected :: SEvent -> Bot ()

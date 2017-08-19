@@ -39,9 +39,9 @@ module Bot (
     timerList, currChanList, autoJoinList, nameCallbacks, whoisCallbacks,
 
     -- * Callback control
-    CallbackHandle(..),
+    CallbackHandle(..), nilCH,
     addCallback, removeCallback,
-    addTimer, removeTimer, runInS,
+    addTimer, removeTimer, runInS, getEndTime,
 
     -- * IO
     -- ** Messaging
@@ -49,7 +49,7 @@ module Bot (
     -- * Queries
     getWhois, getWhowas, getNames,
     -- * Channel management
-    joinChannels,
+    joinChannels, kickUser, kickUserFor,
     -- ** Logging
     putLog, putLogInfo, putLogWarning, putLogError,
 
@@ -67,7 +67,7 @@ import Data.Char (isSpace)
 import Data.Ini as I (Ini(..), readIniFile, writeIniFile, lookupValue, unIni)
 import Data.Text (pack, unpack)
 import Data.HashMap.Lazy as M (lookupDefault, insert, empty)
-import Data.UUID (UUID)
+import Data.UUID (UUID, nil)
 import Data.UUID.V4 (nextRandom)
 import Text.Printf (hPrintf)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
@@ -121,6 +121,15 @@ sendMessage r t = writeMsg $ CMsg PRIVMSG [rs, t]
 joinChannels :: [Channel] -> Bot ()
 joinChannels = mapM_ (\(Channel c) -> writeMsg . CMsg JOIN $ ["#"++c])
 
+-- | Kick the given user from the given channel, with no reason.
+kickUser :: Channel -> User -> Bot ()
+kickUser (Channel c) u = writeMsg $ CMsg KICK ["#"++c, nick u]
+
+-- | Kick the given user from the given channel, with the reason given.
+kickUserFor :: Channel -> User -> String -> Bot ()
+kickUserFor (Channel c) u reason = writeMsg $ CMsg KICK ["#"++c, nick u, reason]
+
+
 -- | List of callbacks for active NAME queries, to be invoked when
 -- the server replies.
 nameCallbacks = GlobalKey [] "nameCallbacks" :: GlobalKey [(String, [User] -> Bot ())]
@@ -155,7 +164,7 @@ putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
           -> Bot ()
 putLog lvl s = do logFile <- getGlobal' logDest
                   timestamp <- liftIO getCurrentTime
-                  let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
+                  let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s
                   liftIO . putStrLn $ s
                   liftIO . appendFile logFile $ logLine
 -- | Log with level INFO.
@@ -170,9 +179,10 @@ putLogError = putLog "ERROR"
 -- UUID.
 newtype CallbackHandle = CallbackHandle UUID
     deriving (Eq, Show, Read)
+nilCH = CallbackHandle nil
 
 -- | Add the given function as a callback for events; return the handle.
-addCallback :: (SEvent -> Bot()) -> Bot (CallbackHandle)
+addCallback :: (SEvent -> Bot ()) -> Bot CallbackHandle
 addCallback cb = do callbacks <- getGlobal callbackList
                     handle <- liftM CallbackHandle $ liftIO nextRandom
                     setGlobal callbackList $ callbacks ++ [(handle, cb)]
@@ -187,7 +197,7 @@ removeCallback h = do callbacks <- getGlobal callbackList
 
 -- | Add a timer to run the given computation at the given time, returning
 -- a handle.
-addTimer :: UTCTime -> Bot () -> Bot (CallbackHandle)
+addTimer :: UTCTime -> Bot () -> Bot CallbackHandle
 addTimer time cb = do timers <- getGlobal timerList
                       handle <- liftM CallbackHandle $ liftIO nextRandom
                       setGlobal timerList $ timers ++ [(handle, time, cb)]
@@ -201,13 +211,19 @@ removeTimer h = do timers <- getGlobal timerList
 
 -- | Run the given computation in the given number of seconds, returning
 -- a handle.
-runInS :: Integral a => a -> Bot () -> Bot (CallbackHandle)
+runInS :: Integral a => a -> Bot () -> Bot CallbackHandle
 runInS s cb = do currTime <- liftIO getCurrentTime
                  let diffTime = fromIntegral s
                  let newTime = addUTCTime diffTime currTime
                  addTimer newTime cb
 
-
+-- | Get the time that the given timer will end on, or Nothing if it can't
+-- be found.
+getEndTime :: CallbackHandle -> Bot (Maybe UTCTime)
+getEndTime h = do timers <- getGlobal timerList
+                  case filter (\(h',_,_)->h'==h) timers of
+                    (_,t,_):xs -> return $ Just t
+                    __         -> return Nothing
 
 
 -- Keys for bot things.
@@ -230,7 +246,7 @@ botNick = CacheKey undefined "BOT" "nick" :: PersistentKey String
 -- | Logging output filename.
 logDest = CacheKey undefined "LOG" "logfile" :: PersistentKey String
 
-{- $mainkey __To be initialised elsewhere before running ('Run.startBot'):__ -}
+{- $mainkey __To be initialised elsewhere before running ('Bot.Run.startBot'):__ -}
 -- | Config file filename.
 configFile = GlobalKey undefined "configFile" :: GlobalKey String
 -- | Socket handle

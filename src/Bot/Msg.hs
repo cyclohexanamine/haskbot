@@ -15,7 +15,8 @@ within a callback. Client messages can be sent generically, as a stock 'CMsg'.
 module Bot.Msg (
     -- * Message structure
     -- ** Generic
-    User(..), Channel(..), Server(..), SenderC, RecipientC,
+    User(..), makeUser, Channel(..), Server(..), 
+    SenderC, RecipientC,
     fromS, fromR, toR,
     -- ** Event
     SEvent(..), Sender(..), Recipient(..),
@@ -39,6 +40,10 @@ import Bot.Msg.Splices
 
 -- | A user with a nickname, and maybe user\/host.
 data User = User { nick :: String, user :: Maybe String, host :: Maybe String } deriving (Eq, Read, Show)
+-- | Make a user struct from just a nick.
+makeUser :: String -> User
+makeUser s = User s Nothing Nothing
+
 -- | A channel; the string doesn't include the '#' prefix.
 newtype Channel = Channel String deriving (Eq, Read, Show)
 -- | A server and its hostname.
@@ -49,7 +54,7 @@ newtype Server = Server String deriving (Eq, Read, Show)
 class RecipientC a where
     -- | 'Recipient' to 'User' or 'Channel'
     fromR :: Recipient -> a
-    -- ^ 'User' or 'Channel' to 'Recipient'
+    -- | 'User' or 'Channel' to 'Recipient'
     toR :: a -> Recipient
 instance RecipientC User where
     fromR (RUser n) = User n Nothing Nothing
@@ -74,7 +79,7 @@ instance SenderC Server where
 
 -- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.
-data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS
+data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS | KICK
     deriving Show
 
 -- | Message that will be sent by the bot. The structure is fairly barebones
