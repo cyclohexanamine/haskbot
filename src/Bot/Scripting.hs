@@ -23,7 +23,8 @@ anywhere; 'Run' doesn't need to know about them, unlike the callbacks.
 
 module Bot.Scripting ( callbacks ) where
 
-import Bot ( Bot, SEvent )
+import Bot.Bot (Bot)
+import Bot.Msg (SEvent)
 
 import qualified Bot.Scripting.Core as C
 import qualified Bot.Scripting.Vote as V

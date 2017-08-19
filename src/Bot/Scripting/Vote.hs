@@ -15,13 +15,13 @@ module Bot.Scripting.Vote (
     showCurrVote, formatVote,
     ) where
 
-import Text.ParserCombinators.Parsec
-import Text.ParserCombinators.Parsec.Number
-import Text.Parsec.Prim (parserFail)
 import Data.Maybe
 import Data.List
 import Data.List.Split (splitOn)
 import Data.Time.Format
+import Text.ParserCombinators.Parsec
+import Text.ParserCombinators.Parsec.Number
+import Text.Parsec.Prim (parserFail)
 
 import Bot
 

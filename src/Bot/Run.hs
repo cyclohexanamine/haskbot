@@ -22,16 +22,17 @@ module Bot.Run (
     handleLine, applyCallbacks, tryApply, runTimers
     ) where
 
+import Control.Concurrent (forkFinally, threadDelay)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
+import Control.Exception (PatternMatchFail, evaluate, try)
+import Data.Maybe (catMaybes, mapMaybe)
+import Data.Time.Clock (getCurrentTime)
 import Network (PortID(PortNumber), connectTo)
 import System.IO (Handle, BufferMode(LineBuffering), hSetBuffering, hGetLine, hReady)
 import System.IO.Unsafe (unsafePerformIO)
-import Data.Maybe (catMaybes, mapMaybe)
-import Data.Time.Clock (getCurrentTime)
-import Control.Exception (PatternMatchFail, evaluate, try)
-import Control.Concurrent (forkFinally, threadDelay)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 
-import Bot
+import Bot.Bot
+import Bot.Msg
 import Bot.Scripting as S (callbacks)
 
 
