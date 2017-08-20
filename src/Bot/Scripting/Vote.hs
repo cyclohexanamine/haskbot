@@ -55,10 +55,12 @@ callbacks = [ processCommand, onStartup ]
 -- Persistent values holding information about voting, the current vote, etc.
 -- | The channel the bot should take votes in.
 voteChan = CacheKey (Channel "") "VOTE" "voteChan"
+
 voteTimer = GlobalKey nilCH "voteTimer" :: GlobalKey CallbackHandle
 voteOpts = CacheKey Nothing "VOTE" "voteOpts" :: PersistentKey (Maybe VoteOpt)
 yesHosts = CacheKey [] "VOTE" "yesHosts" :: PersistentKey [String]
 noHosts = CacheKey [] "VOTE" "noHosts" :: PersistentKey [String]
+lastVote = CacheKey VYes "VOTE" "lastVote" :: PersistentKey VoteChoice
 banTimers = CacheKey [] "VOTE" "banTimers" :: PersistentKey [(UTCTime, Channel, [String])]
 
 commandChar = '!'
@@ -136,7 +138,8 @@ startVote o = do
 
 
 -- | A yes\/no vote.
-data VoteChoice = VYes | VNo
+data VoteChoice = VYes | VNo 
+    deriving (Eq, Read, Show)
 
 -- | !yes or !no - vote yes or no, checking the user's host to see if they've already
 -- voted.
@@ -156,10 +159,12 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
     else if host `elem` otherL then do
         setGlobal' (fst choices) $ thisL ++ [host]
         setGlobal' (snd choices) $ delete host otherL
+        setGlobal' lastVote choice
         sendMessage ch $ "You've already voted "++(snd choiceNames)++", "++nick++
                          ". Your vote has been changed to "++(fst choiceNames)++"."
     else do
         setGlobal' (fst choices) $ thisL ++ [host]
+        setGlobal' lastVote choice
         sendMessage ch $ "Your vote has been counted as "++(fst choiceNames)++", "++nick++"."
 
 
@@ -206,6 +211,7 @@ voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
     putLogInfo $ "Ending vote: " ++ show opts
     yesC <- getGlobal' yesHosts >>= return . fromIntegral . length
     noC <- getGlobal' noHosts >>= return . fromIntegral . length
+    lastV <- getGlobal' lastVote
     ch <- getGlobal' voteChan
     let act = actionO opts
     setGlobal' voteOpts Nothing
@@ -216,7 +222,10 @@ voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
     then sendMessage ch $ "Vote failed - the votes were "++show yesC++" for and "++show noC++" against."++
                           "No action will be taken."
     else if noC == yesC
-    then sendMessage ch $ "Vote tied - the votes were "++show yesC++" each. No action will be taken."
+    then case lastV of
+           VNo -> do sendMessage ch $ "Vote tied, and removing the last vote succeeds. "++formatVote opts
+                     enactVote opts
+           VYes -> sendMessage ch $ "Vote tied, and removing the last vote fails. No action will be taken"
     else do sendMessage ch $ "Vote successful. "++formatVote opts
             enactVote opts
 
