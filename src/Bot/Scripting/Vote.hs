@@ -29,7 +29,7 @@ import Bot
 
 -- | Vote options.
 data VoteOpt = VoteOpt { actionO :: ActionSetting, targetO :: String
-                       , lenO :: Either Char Integer, reasonO :: Maybe String
+                       , lenO :: Integer, reasonO :: Maybe String
                        , hostO :: Maybe String
                        } deriving (Eq, Read, Show)
 
@@ -67,6 +67,7 @@ commands = [ ("vote", vote)
            , ("yes", castVote VYes)
            , ("no", castVote VNo)
            , ("voteinfo", voteInfo)
+           , ("votehelp", voteHelp)
            ]
 
 
@@ -232,21 +233,37 @@ enactVote opts = do
         else case actAS . actionO $ opts of
             "kick" -> kickUserFor ch (makeUser . targetO $ opts) reasonStr
             "ban" -> do mapM_ (banMask ch) targetMasks
-                        case lenO opts of 
-                          Left _ -> return ()
-                          Right len -> do
-                            timeMb <- runInS len (enactUnban ch targetMasks) >>= getEndTime
-                            case timeMb of Just t -> modGlobal' banTimers (++[(t, ch, targetMasks)])
-                                           Nothing -> return ()
+                        timeMb <- runInS (lenO opts) (enactUnban ch targetMasks) >>= getEndTime
+                        case timeMb of Just t -> modGlobal' banTimers (++[(t, ch, targetMasks)])
+                                       Nothing -> return ()
                         kickUserFor ch (makeUser . targetO $ opts) reasonStr
+            "permaban" -> do mapM_ (banMask ch) targetMasks
+                             kickUserFor ch (makeUser . targetO $ opts) reasonStr
             "unban" -> mapM_ (unbanMask ch) targetMasks
   where targetMasks = [targetO opts++"!*@*"] ++ case hostO opts of Just h  -> ["*!*@"++h]
                                                                    Nothing -> []
 
 enactUnban :: Channel -> [String] -> Bot ()
 enactUnban ch targetMasks = do
-    mapM_ (unbanMask ch) targetMasks
-    modGlobal' banTimers $ filter (\(_, ch', targetMasks') -> ch/=ch' || targetMasks/=targetMasks')
+    opchs <- getGlobal' statusOpChars
+    getOwnStatus ch $ \resp ->
+        if isNothing resp || not ((fromJust resp) `elem` opchs)
+        then sendMessage ch $ "The following masks should be unbanned now, but I don't have op privileges: "++
+                               intercalate ", " targetMasks
+        else do mapM_ (unbanMask ch) targetMasks
+                modGlobal' banTimers $ filter (\(_, ch', targetMasks') -> ch/=ch' || targetMasks/=targetMasks')
+
+
+-- | Show a help message giving some details about voting.
+voteHelp :: SEvent -> Bot ()
+voteHelp (SPrivmsg (SUser nick _ host) ch _) = do
+    kickA <- findAct "kick" >>= return . fromJust
+    banA <- findAct "ban" >>= return . fromJust
+    permabanA <- findAct "permaban" >>= return . fromJust
+    unbanA <- findAct "unban" >>= return . fromJust
+    sendMessage (makeUser nick) $ "I am a democratic moderation bot. To start a vote, say !vote action target reason. The reason is optional, and can be more than one word as long as it does not contain hyphens. The options for action are 'kick', 'ban', 'permaban' and 'unban'. To manually specify the length of a ban, append -l length, where length is the length of the ban in hours. The default length is "++show((defaultLenAS banA)`div`3600)++" hours."
+    sendMessage (makeUser nick) $ "To vote yes, say !yes and to vote no, say !no. I will automatically get the host of the target given their exact nick, but I cannot do this for people who have not been on the server recently - a few hours."
+    sendMessage (makeUser nick) $ "The minimum number of votes is "++show(voteThresholdAS kickA)++" for a kick, "++show(voteThresholdAS banA)++" for bans, "++show(voteThresholdAS permabanA)++" for permabans, "++show(voteThresholdAS unbanA)++" for unbans; the duration of the vote in minutes is "++show((voteLenAS kickA)`div`60)++" for a kick, "++show((voteLenAS banA)`div`60)++" for bans, "++show((voteLenAS permabanA)`div`60)++" for permabans, "++show((voteLenAS unbanA)`div`60)++" for unbans. If there is a tie I will remove the last vote. To see information about the current vote, say '!voteinfo'."
 
 
 -- Command parsing
@@ -268,7 +285,7 @@ parseCommand = do cmd <- parseUntil' " "
 
 -- | Parser for a !vote command, returning parsed parameters if successful, or
 -- an error message to send to the channel if not.
-parseVoteCmd :: Parser (Either String (String, String, Maybe (Either Char Integer), Maybe String))
+parseVoteCmd :: Parser (Either String (String, String, Maybe Integer, Maybe String))
 parseVoteCmd = do start <- parseUntil' " "
                   action <- optionMaybe $ parseUntil' " "
                   target <- optionMaybe $ parseUntil' " "
@@ -276,7 +293,7 @@ parseVoteCmd = do start <- parseUntil' " "
                   len <- optionMaybe $ do optionMaybe $ char '-'
                                           char 'l'
                                           optionMaybe $ char ' '
-                                          (char 'p' >>= return . Left) <|> (decimal >>= return . Right . (*3600))
+                                          decimal >>= return . (*3600)
                   if start /= "!vote"
                   then parserFail $ "Parse fail in parseVoteCmd - " ++ start
                   else if isNothing action
@@ -297,6 +314,6 @@ validateVote ch text = do
             case actSettingMb of
                 Nothing -> sendMessage ch ("'"++act++"' is not a valid action.") >> return Nothing
                 Just actSetting ->
-                    let len = case lenMb of Nothing -> Right (defaultLenAS actSetting)
+                    let len = case lenMb of Nothing -> defaultLenAS actSetting
                                             Just l -> l
                     in return . Just $ VoteOpt actSetting targ len reasonMb Nothing
