@@ -3,7 +3,7 @@
 The voting logic.
 -}
 module Bot.Scripting.Vote (
-    callbacks, voteChan, actionSettings,
+    callbacks, voteChan, actionSettings, onStartup,
     -- * Vote data
     VoteOpt(..), ActionSetting(..),
     -- * Command handling
@@ -19,6 +19,7 @@ import Data.Maybe
 import Data.List
 import Data.List.Split (splitOn)
 import Data.Time.Format
+import Data.Time.Clock (UTCTime)
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Number
 import Text.Parsec.Prim (parserFail)
@@ -29,8 +30,8 @@ import Bot
 -- | Vote options.
 data VoteOpt = VoteOpt { actionO :: ActionSetting, targetO :: String
                        , lenO :: Either Char Integer, reasonO :: Maybe String
-                       , hostO :: Maybe String }
-    deriving (Eq, Read, Show)
+                       , hostO :: Maybe String
+                       } deriving (Eq, Read, Show)
 
 -- | Action setting struct - an action is something that can be voted on for
 -- the bot to carry out.
@@ -39,8 +40,8 @@ data ActionSetting = ActionSetting { actAS :: String -- ^ The name of the action
                                    , voteLenAS :: Integer -- ^ The length of the vote, in seconds.
                                    , voteThresholdAS :: Integer -- ^ The minimum number of votes that must be cast for the vote to pass.
                                    , useHostAS :: Bool -- ^ Whether the action requires a hostname on the part of the target.
-                                   }
-    deriving (Eq, Read, Show)
+                                   , defaultLenAS :: Integer -- ^ The default duration of the action in seconds, if not specified by a '-l' option.
+                                   } deriving (Eq, Read, Show)
 
 -- | Action settings for each action.
 actionSettings = PersistentKey [] "VOTE" "actionSettings" :: PersistentKey [ActionSetting]
@@ -58,6 +59,7 @@ voteTimer = GlobalKey nilCH "voteTimer" :: GlobalKey CallbackHandle
 voteOpts = CacheKey Nothing "VOTE" "voteOpts" :: PersistentKey (Maybe VoteOpt)
 yesHosts = CacheKey [] "VOTE" "yesHosts" :: PersistentKey [String]
 noHosts = CacheKey [] "VOTE" "noHosts" :: PersistentKey [String]
+banTimers = CacheKey [] "VOTE" "banTimers" :: PersistentKey [(UTCTime, Channel, [String])]
 
 commandChar = '!'
 -- | The commands a user can give in the channel.
@@ -67,10 +69,14 @@ commands = [ ("vote", vote)
            , ("voteinfo", voteInfo)
            ]
 
--- | Clear the current vote (for dev purposes).
+
+-- | Reinstate any outstanding ban callbacks.
+-- Also, clear the current vote for dev purposes.
 onStartup :: SEvent -> Bot ()
 onStartup Startup = do
+    getGlobal' banTimers >>= mapM_ (\(t, ch, targs) -> addTimer t (enactUnban ch targs))
     setGlobal' voteOpts Nothing
+
 
 -- | Listen to all channel messages, and extract those which are
 -- commands for this bot.
@@ -86,6 +92,7 @@ processCommand ev@(SPrivmsg (SUser _ _ _) ch@(RChannel _) text)
     | otherwise
     = return ()
 
+
 -- | !vote - command to start a vote.
 vote :: SEvent -> Bot ()
 vote (SPrivmsg usr ch text) = do
@@ -96,21 +103,22 @@ vote (SPrivmsg usr ch text) = do
             Just opts -> findTarget opts
             Nothing  -> return ()
 
+
 -- | Look up the target - a whois\/whowas for kick\/banning, or checking if they're in the channel for a kick.
 findTarget :: VoteOpt -> Bot ()
-findTarget o =
+findTarget o@VoteOpt{targetO=targ} =
     if useHostAS . actionO $ o
-    then getWhois (User targ Nothing Nothing) $ \mbUser ->
+    then getWhois (makeUser targ) $ \mbUser ->
         case mbUser of
-          Just (User n _ (Just h)) -> startVote $ o { hostO = Just h }
-          _ -> getWhowas (User targ Nothing Nothing) $ \mbUser ->
+          Just User{host=(Just h)} -> startVote $ o { hostO = Just h }
+          _ -> getWhowas (makeUser targ) $ \mbUser ->
             case mbUser of
-              Just (User n _ (Just h)) -> startVote $ o { hostO = Just h }
+              Just User{host=(Just h)} -> startVote $ o { hostO = Just h }
               _ -> getGlobal' voteChan >>= \c -> do sendMessage c $ "Can't find target '" ++ targ ++ "'."
     else getGlobal' voteChan >>= \c -> getNames c $ \namesL ->
-        if targ `elem` [n | (User n _ _) <- namesL] then startVote o
+        if targ `elem` [n | User{nick=n} <- namesL] then startVote o
                               else sendMessage c $ "Target '" ++ targ ++ "' not in channel."
-  where targ = targetO o
+
 
 -- | Start the given vote.
 startVote :: VoteOpt -> Bot ()
@@ -124,6 +132,7 @@ startVote o = do
     voteStr <- showCurrVote
     sendMessage ch $ "Starting vote. " ++ voteStr
     putLogInfo $ "Starting vote with options " ++ show o
+
 
 -- | A yes\/no vote.
 data VoteChoice = VYes | VNo
@@ -140,7 +149,7 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
     thisL <- getGlobal' $ fst choices
     otherL <- getGlobal' $ snd choices
     isVote <- getGlobal' voteOpts >>= return . isJust
-    if (fromR ch) /= vChan || not isVote then return ()
+    if (fromR ch) /= vChan || not isVote then sendMessage ch $ "No vote currently taking place."
     else if host `elem` thisL then sendMessage ch $ "You've already voted "++(fst choiceNames)++
                                                     ", "++nick++". Your vote is unaffected."
     else if host `elem` otherL then do
@@ -166,6 +175,7 @@ voteInfo (SPrivmsg (SUser nick _ host) c@(RChannel ch) _) = do
     else if isNothing optsMb then sendMessage c "No vote currently taking place."
     else sendMessage c infoStr
 
+
 -- | Gets info about the current vote, including end time.
 showCurrVote :: Bot (String)
 showCurrVote = do
@@ -189,13 +199,54 @@ formatVote opts = startS ++ actS ++ reasonS
 
 -- | End the current vote, taking the action if successful.
 voteEnd :: Bot ()
-voteEnd = getGlobal' voteOpts >>= \oMb -> case oMb of
+voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
   Nothing -> return ()
   Just opts -> do
     putLogInfo $ "Ending vote: " ++ show opts
-    setGlobal' voteOpts Nothing
+    yesC <- getGlobal' yesHosts >>= return . fromIntegral . length
+    noC <- getGlobal' noHosts >>= return . fromIntegral . length
     ch <- getGlobal' voteChan
-    kickUser ch . makeUser . targetO $ opts
+    let act = actionO opts
+    setGlobal' voteOpts Nothing
+    if yesC + noC < (voteThresholdAS act)
+    then sendMessage ch $ "Not enough votes were cast; needed "++show (voteThresholdAS act)++" for a "++
+                          actAS act++" vote but got "++show (yesC + noC)++"."
+    else if noC > yesC
+    then sendMessage ch $ "Vote failed - the votes were "++show yesC++" for and "++show noC++" against."++
+                          "No action will be taken."
+    else if noC == yesC
+    then sendMessage ch $ "Vote tied - the votes were "++show yesC++" each. No action will be taken."
+    else do sendMessage ch $ "Vote successful. "++formatVote opts
+            enactVote opts
+
+-- | Carry out the vote action.
+enactVote :: VoteOpt -> Bot ()
+enactVote opts = do
+    ch <- getGlobal' voteChan
+    opchs <- getGlobal' statusOpChars
+    let reasonStr = "Voted" ++ case reasonO opts of Just s -> ": " ++ s
+                                                    Nothing -> "."
+    getOwnStatus ch $ \resp ->
+        if isNothing resp || not ((fromJust resp) `elem` opchs)
+        then sendMessage ch "Need op privileges to carry out the action."
+        else case actAS . actionO $ opts of
+            "kick" -> kickUserFor ch (makeUser . targetO $ opts) reasonStr
+            "ban" -> do mapM_ (banMask ch) targetMasks
+                        case lenO opts of 
+                          Left _ -> return ()
+                          Right len -> do
+                            timeMb <- runInS len (enactUnban ch targetMasks) >>= getEndTime
+                            case timeMb of Just t -> modGlobal' banTimers (++[(t, ch, targetMasks)])
+                                           Nothing -> return ()
+                        kickUserFor ch (makeUser . targetO $ opts) reasonStr
+            "unban" -> mapM_ (unbanMask ch) targetMasks
+  where targetMasks = [targetO opts++"!*@*"] ++ case hostO opts of Just h  -> ["*!*@"++h]
+                                                                   Nothing -> []
+
+enactUnban :: Channel -> [String] -> Bot ()
+enactUnban ch targetMasks = do
+    mapM_ (unbanMask ch) targetMasks
+    modGlobal' banTimers $ filter (\(_, ch', targetMasks') -> ch/=ch' || targetMasks/=targetMasks')
 
 
 -- Command parsing
@@ -225,7 +276,7 @@ parseVoteCmd = do start <- parseUntil' " "
                   len <- optionMaybe $ do optionMaybe $ char '-'
                                           char 'l'
                                           optionMaybe $ char ' '
-                                          (char 'p' >>= return . Left) <|> (decimal >>= return . Right)
+                                          (char 'p' >>= return . Left) <|> (decimal >>= return . Right . (*3600))
                   if start /= "!vote"
                   then parserFail $ "Parse fail in parseVoteCmd - " ++ start
                   else if isNothing action
@@ -246,6 +297,6 @@ validateVote ch text = do
             case actSettingMb of
                 Nothing -> sendMessage ch ("'"++act++"' is not a valid action.") >> return Nothing
                 Just actSetting ->
-                    let len = case lenMb of Nothing -> Right (voteLenAS actSetting)
+                    let len = case lenMb of Nothing -> Right (defaultLenAS actSetting)
                                             Just l -> l
                     in return . Just $ VoteOpt actSetting targ len reasonMb Nothing

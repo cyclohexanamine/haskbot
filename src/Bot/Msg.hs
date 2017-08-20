@@ -15,14 +15,15 @@ within a callback. Client messages can be sent generically, as a stock 'CMsg'.
 module Bot.Msg (
     -- * Message structure
     -- ** Generic
-    User(..), makeUser, Channel(..), Server(..), 
+    User(..), Channel(..), Server(..), 
     SenderC, RecipientC,
     fromS, fromR, toR,
+    makeUser, makeUserH,
+    makeChannel, channelToStr,
     -- ** Event
     SEvent(..), Sender(..), Recipient(..),
     -- ** Client message
     CMsg(..), ClientCmd(..),
-    -- * Sending messages
 
     -- * Parsing and serialising
     joinMsg, readMsg,
@@ -38,14 +39,30 @@ import Data.List (intercalate)
 import Bot.Msg.Splices
 
 
--- | A user with a nickname, and maybe user\/host.
-data User = User { nick :: String, user :: Maybe String, host :: Maybe String } deriving (Eq, Read, Show)
+-- | A user with a nickname, and maybe user\/host\/other things. This
+-- is multipurpose, used just to indicate that some nick is a user 
+-- (when used with 'makeUser'), or, e.g., as a result from a NAMES or
+-- WHOIS request containing more info about the user.
+data User = User { nick :: String -- ^ Nick
+                 , user :: Maybe String -- ^ User, if we know it.
+                 , host :: Maybe String -- ^ Host, if we know it.
+                 , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op). 
+                 } deriving (Eq, Read, Show)
 -- | Make a user struct from just a nick.
 makeUser :: String -> User
-makeUser s = User s Nothing Nothing
+makeUser s = User s Nothing Nothing []
+
+-- | Make a user struct from a nick, user string and host string.
+makeUserH :: String -> String -> String -> User
+makeUserH s u h = User s (Just u) (Just h) []
 
 -- | A channel; the string doesn't include the '#' prefix.
 newtype Channel = Channel String deriving (Eq, Read, Show)
+-- | Take a channel name of the form "#chan" and create a 'Channel'.
+makeChannel (x:xs) = Channel xs
+-- | Turn a 'Channel' into a channel name of the form "#chan".
+channelToStr (Channel c) = "#"++c
+
 -- | A server and its hostname.
 newtype Server = Server String deriving (Eq, Read, Show)
 
@@ -57,8 +74,8 @@ class RecipientC a where
     -- | 'User' or 'Channel' to 'Recipient'
     toR :: a -> Recipient
 instance RecipientC User where
-    fromR (RUser n) = User n Nothing Nothing
-    toR (User n _ _) = RUser n
+    fromR (RUser n) = makeUser n
+    toR u = RUser (nick u)
 instance RecipientC Channel where
     fromR (RChannel c) = Channel c
     toR (Channel c) = RChannel c
@@ -72,14 +89,14 @@ class SenderC a where
     -- | 'Sender' to 'User' or 'Server'
     fromS :: Sender -> a
 instance SenderC User where
-    fromS (SUser n u h) = User n (Just u) (Just h)
+    fromS (SUser n u h) = makeUserH n u h
 instance SenderC Server where
     fromS (SServer h) = Server h
 
 
 -- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.
-data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS | KICK
+data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS | KICK | MODE
     deriving Show
 
 -- | Message that will be sent by the bot. The structure is fairly barebones

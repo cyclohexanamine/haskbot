@@ -88,10 +88,14 @@ respondToKick e@(SKick (SUser nick _ _) ch@(RChannel _) target reason) = do
 -- the requester will be called on 353 and unhooked; or if, e.g., the channel
 -- doesn't exist, the server will only send a 366 and the requester will be
 -- called on that.
-respondToNAMES (SNumeric _ 353 ([_,_,ch,names])) = namesResponse ch namesL
-    where  namesL = map (\n -> User n Nothing Nothing) .
-                    map (\(x:xs) -> if x `elem` ['+','@'] then xs else x:xs) $
-                    splitOn " " names
+respondToNAMES (SNumeric _ 353 ([_,_,ch,names])) = do
+    chrs <- getGlobal' statusChars
+    let toUser (x:xs) = if x `elem` chrs 
+                          then (makeUser xs){statusCharL=[(makeChannel ch, x)]} 
+                          else makeUser (x:xs)
+    let namesL = map toUser . splitOn " " $ names
+    namesResponse ch namesL
+
 respondToNAMES (SNumeric _ 366 [_,_,ch,_]) = namesResponse ch []
 
 -- | Find the requester for the NAMES query, unhook and invoke it.
@@ -107,9 +111,9 @@ namesResponse ch cL = do
 -- and RPL_ENDOFWHOIS (318). It also handles the equivalent WHOWAS responses,
 -- since they're virtually identical - RPL_WHOWASUSER (314) and RPL_ENDOFWHOWAS
 -- (369).
-respondToWHOISUSER (SNumeric _ 311 [_,n,u,h,_,realName]) = whoisResponse n . Just $ User n (Just u) (Just h)
+respondToWHOISUSER (SNumeric _ 311 [_,n,u,h,_,realName]) = whoisResponse n . Just $ makeUserH n u h
 respondToWHOISUSER (SNumeric _ 318 [_,n,_]) = whoisResponse n Nothing
-respondToWHOISUSER (SNumeric _ 314 [_,n,u,h,_,realName]) = whoisResponse n . Just $ User n (Just u) (Just h)
+respondToWHOISUSER (SNumeric _ 314 [_,n,u,h,_,realName]) = whoisResponse n . Just $ makeUserH n u h
 respondToWHOISUSER (SNumeric _ 369 [_,n,_]) = whoisResponse n Nothing
 
 -- | Find the requester for the WHOIS\/WHOWAS query, unhook and invoke it.
