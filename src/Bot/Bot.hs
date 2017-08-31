@@ -25,7 +25,7 @@ share them across modules by exporting the keys.
 
 module Bot.Bot (
     -- * The Bot monad
-    Bot(..), runBot,
+    Bot(..), runBot, changeBotState,
 
     -- * Global storage
     PersistentKey(..),
@@ -51,7 +51,7 @@ module Bot.Bot (
     putLog, putLogInfo, putLogWarning, putLogError,
 
     -- * Re-exported for convenience
-    liftIO, rstrip,
+    get, put, liftIO, rstrip,
     ) where
 
 import Control.Concurrent (ThreadId)
@@ -84,6 +84,10 @@ newtype Bot a = Bot {
 -- | Extract the IO computation by running the bot on the given initial state.
 runBot :: Bot a -> GlobalStore -> IO a
 runBot b = liftM fst . runStateT (getBot b)
+
+-- | Modify the global state by running the computation on the initial state.
+changeBotState :: Bot a -> GlobalStore -> IO GlobalStore
+changeBotState b = liftM snd . runStateT (getBot b)
 
 
 -- | Get the value at k in the state.

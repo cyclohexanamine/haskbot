@@ -19,13 +19,15 @@ module Bot.Run (
     -- * Networking
     startBot, connectAndListen, listenMain, listenH,
     -- * Callback handling
-    handleLine, applyCallbacks, tryApply, runTimers
+    handleLine, applyCallbacks, tryApply, runCallbackSafe, runTimers
     ) where
 
 import Control.Concurrent (forkIO, threadDelay)
 import GHC.Conc (threadStatus, ThreadStatus(ThreadDied, ThreadFinished))
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
-import Control.Exception (PatternMatchFail, evaluate, try)
+import Control.DeepSeq (force)
+import Control.Exception (PatternMatchFail, SomeException, evaluate, try)
+import Control.Monad (liftM)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Time.Clock (getCurrentTime)
 import Network (PortID(PortNumber), connectTo)
@@ -47,7 +49,7 @@ runTimers = do timers <- getGlobal timerList
                let expired = filter (\(h, t, c) -> t < currTime) timers
                let newTimers = mapMaybe (\a@(h, t, c) -> if t < currTime then Nothing else Just a) timers
                setGlobal timerList newTimers
-               mapM_ id . map (\(h, t, c)->c) $ expired
+               mapM_ runCallbackSafe . map (\(h, t, c)->c) $ expired
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
 handleLine :: String -> Bot ()
@@ -58,7 +60,7 @@ handleLine s = case readMsg s of
 -- | Apply all message callbacks in 'callbackList' which pattern-match the message.
 applyCallbacks :: SEvent -> Bot ()
 applyCallbacks msg = do callbacks <- getGlobal callbackList
-                        mapM_ id . catMaybes . map (flip tryApply $ msg) . map snd $callbacks
+                        mapM_ runCallbackSafe . catMaybes . map (flip tryApply $ msg) . map snd $callbacks
 
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
 -- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
@@ -67,6 +69,16 @@ tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
                 Left err -> Nothing
                 Right r -> Just r
                where tryMatch = try :: IO a -> IO (Either PatternMatchFail a)
+
+-- | Run the given callback, handling any exceptions that occur.
+runCallbackSafe :: Bot () -> Bot ()
+runCallbackSafe cb = do
+    store <- get
+    stateOrErr <- liftIO (tryAll $ changeBotState cb store)
+    case stateOrErr of
+      Left err -> putLogError $ "Error in callback: " ++ show err
+      Right st -> put st
+   where tryAll = try :: IO a -> IO (Either SomeException a)
 
 
 -- Networking
@@ -118,9 +130,9 @@ connectAndListen = do
         setGlobal listenThread listenThread'
         applyCallbacks Connected
         listenMain mv
-        
+
       Left e ->
-        if isDoesNotExistError e 
+        if isDoesNotExistError e
           then do putLogWarning "Couldn't connect to host; retrying"
                   liftIO $ threadDelay 10000000
                   connectAndListen
