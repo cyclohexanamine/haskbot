@@ -14,6 +14,8 @@ module Bot.Scripting.Core (
     -- * Queries
     respondToNAMES, respondToWHOISUSER,
     namesResponse, whoisResponse,
+    -- * Nick management
+    acquiredNick, nickservIdent,
     -- * Channel management
     respondToJoin, respondToPart, respondToKick,
     -- * Other
@@ -33,6 +35,8 @@ callbacks = [ connected
 
             , managePingTimer
             , respondToPong
+
+            , acquiredNick
 
             , respondToJoin
             , respondToPart
@@ -82,6 +86,7 @@ pingTimeoutLen = CacheKey 60 "BOT" "pingTimeoutLen" :: PersistentKey Integer
 -- will force a reconnect if it expires. When we receive ping response, we
 -- reset the timer, so that it's only triggered if we don't receive a timely
 -- response.
+managePingTimer :: SEvent -> Bot ()
 managePingTimer (Connected) = do
     tm <- getGlobal' pingTimeoutLen
     runInS tm pingTimeout >>= setGlobal pingTimeoutHandle
@@ -91,6 +96,7 @@ managePingTimer (Disconnected) = do
     getGlobal pingTimeoutHandle >>= removeTimer
 
 -- | Send a ping to the server, every pingTimeoutLen/3 seconds.
+pingTimer :: Bot ()
 pingTimer = do
     nick <- getGlobal' botNick
     writeMsg $ CMsg PING [nick]
@@ -98,6 +104,7 @@ pingTimer = do
     runInS (div tm 3) pingTimer >>= setGlobal pingTimerHandle
 
 -- | Receive a ping reply from the server and reset the timeout timer.
+respondToPong :: SEvent -> Bot ()
 respondToPong (SPong _ _) = do
     getGlobal pingTimeoutHandle >>= removeTimer
     tm <- getGlobal' pingTimeoutLen
@@ -105,10 +112,36 @@ respondToPong (SPong _ _) = do
 
 -- | Disconnect from the server by any means by killing the listener thread.
 -- This will force a disconnect/reconnect in the main event thread.
+pingTimeout :: Bot ()
 pingTimeout = do
     tm <- getGlobal' pingTimeoutLen
     putLogWarning $ "Ping timeout: " ++ show tm ++ " seconds."
     getGlobal listenThread >>= liftIO . killThread
+
+
+-- Nick management
+-- | The password to use to identify the nickname with NickServ.
+identPassword = CacheKey "" "BOT" "identPassword"
+-- | The address of the NickServ service on the server.
+nickservAddr = CacheKey (SServer "") "SERVER" "nickserv"
+
+handleNickservNotice = GlobalKey nilCH "handleNickservNotice" :: GlobalKey CallbackHandle
+
+-- | On '001', i.e., getting assigned a nick, start listening for a message from NickServ
+-- in case we have to identify for it.
+acquiredNick :: SEvent -> Bot ()
+acquiredNick (SNumeric _ 001 _) = addCallback nickservIdent >>= setGlobal handleNickservNotice
+
+-- | On the first message from NickServ, whatever it is, identify for our nick.
+nickservIdent :: SEvent -> Bot ()
+nickservIdent (SNotice sender@(SUser _ _ _) _ _) = do
+    nsAddr <- getGlobal' nickservAddr
+    nsPass <- getGlobal' identPassword
+    if sender /= nsAddr || nsAddr == SServer "" || nsPass == "" then return ()
+    else do
+        getGlobal handleNickservNotice >>= removeCallback
+        sendMessage (fromS sender :: User) ("IDENTIFY "++nsPass)
+
 
 
 -- Channel management

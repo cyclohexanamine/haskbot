@@ -117,11 +117,11 @@ data SEvent
     | SPong { srv :: String, srv2 :: String }
     | SNotice { from :: Sender, to :: Recipient, text :: String }
     | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
-    | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
     | SJoin { from :: Sender, to :: Recipient }
     | SPart { from :: Sender, to :: Recipient }
     | SKick { from :: Sender, to :: Recipient, target :: String, reason :: String }
     | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: String }
+    | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
     | Startup
     | Connected
     | Disconnected

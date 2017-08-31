@@ -49,7 +49,7 @@ runTimers = do timers <- getGlobal timerList
                let expired = filter (\(h, t, c) -> t < currTime) timers
                let newTimers = mapMaybe (\a@(h, t, c) -> if t < currTime then Nothing else Just a) timers
                setGlobal timerList newTimers
-               mapM_ runCallbackSafe . map (\(h, t, c)->c) $ expired
+               sequence_ . map runCallbackSafe . map (\(h, t, c)->c) $ expired
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
 handleLine :: String -> Bot ()
@@ -60,7 +60,8 @@ handleLine s = case readMsg s of
 -- | Apply all message callbacks in 'callbackList' which pattern-match the message.
 applyCallbacks :: SEvent -> Bot ()
 applyCallbacks msg = do callbacks <- getGlobal callbackList
-                        mapM_ runCallbackSafe . catMaybes . map (flip tryApply $ msg) . map snd $callbacks
+                        let applicable = catMaybes . map (flip tryApply $ msg) . map snd $ callbacks
+                        sequence_ . map runCallbackSafe $ applicable 
 
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
 -- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
