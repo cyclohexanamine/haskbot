@@ -9,6 +9,8 @@ module Bot.Scripting.Core (
     callbacks,
     -- * Connection
     connected, respondToEndOfMOTD,
+    managePingTimer, pingTimeoutLen,
+    pingTimer, respondToPong, pingTimeout,
     -- * Queries
     respondToNAMES, respondToWHOISUSER,
     namesResponse, whoisResponse,
@@ -19,13 +21,18 @@ module Bot.Scripting.Core (
     ) where
 import Bot
 
+import Control.Concurrent (forkIO, threadDelay, killThread)
 import Data.List (delete)
 import Data.List.Split (splitOn)
+
 
 -- | Event hooks
 callbacks = [ connected
 
             , respondToPing
+
+            , managePingTimer
+            , respondToPong
 
             , respondToJoin
             , respondToPart
@@ -36,6 +43,7 @@ callbacks = [ connected
             ]
 
 
+-- Connection management
 
 handle376 = GlobalKey nilCH "handle376" :: GlobalKey CallbackHandle
 
@@ -58,6 +66,49 @@ respondToEndOfMOTD (SNumeric _ 376 _) = do
 -- | Respond to a server PING with PONG.
 respondToPing :: SEvent -> Bot ()
 respondToPing (SPing srv) = writeMsg $ CMsg PONG [srv]
+
+
+pingTimerHandle = GlobalKey nilCH "pingTimerHandle"
+pingTimeoutHandle = GlobalKey nilCH "pingTimeoutHandle"
+pingN = GlobalKey "" "pingN" :: GlobalKey String
+-- | How long we should wait without receiving a ping response before
+-- reconnecting to the server. Pings will be sent at intervals of a third
+-- of this.
+pingTimeoutLen = CacheKey 60 "BOT" "pingTimeoutLen" :: PersistentKey Integer
+
+-- | Register or unregister the ping timers when we connect/disconnect.
+-- Every once in a while we'll send a ping to the server, to see if the
+-- connection is still active. We have a timeout timer, 'pingTimeout', that
+-- will force a reconnect if it expires. When we receive ping response, we
+-- reset the timer, so that it's only triggered if we don't receive a timely
+-- response.
+managePingTimer (Connected) = do
+    tm <- getGlobal' pingTimeoutLen
+    runInS tm pingTimeout >>= setGlobal pingTimeoutHandle
+    runInS (div tm 3) pingTimer >>= setGlobal pingTimerHandle
+managePingTimer (Disconnected) = do
+    getGlobal pingTimerHandle >>= removeTimer
+    getGlobal pingTimeoutHandle >>= removeTimer
+
+-- | Send a ping to the server, every pingTimeoutLen/3 seconds.
+pingTimer = do
+    nick <- getGlobal' botNick
+    writeMsg $ CMsg PING [nick]
+    tm <- getGlobal' pingTimeoutLen
+    runInS (div tm 3) pingTimer >>= setGlobal pingTimerHandle
+
+-- | Receive a ping reply from the server and reset the timeout timer.
+respondToPong (SPong _ _) = do
+    getGlobal pingTimeoutHandle >>= removeTimer
+    tm <- getGlobal' pingTimeoutLen
+    runInS tm pingTimeout >>= setGlobal pingTimeoutHandle
+
+-- | Disconnect from the server by any means by killing the listener thread.
+-- This will force a disconnect/reconnect in the main event thread.
+pingTimeout = do
+    tm <- getGlobal' pingTimeoutLen
+    putLogWarning $ "Ping timeout: " ++ show tm ++ " seconds."
+    getGlobal listenThread >>= liftIO . killThread
 
 
 -- Channel management
@@ -90,8 +141,8 @@ respondToKick e@(SKick (SUser nick _ _) ch@(RChannel _) target reason) = do
 -- called on that.
 respondToNAMES (SNumeric _ 353 ([_,_,ch,names])) = do
     chrs <- getGlobal' statusChars
-    let toUser (x:xs) = if x `elem` chrs 
-                          then (makeUser xs){statusCharL=[(makeChannel ch, x)]} 
+    let toUser (x:xs) = if x `elem` chrs
+                          then (makeUser xs){statusCharL=[(makeChannel ch, x)]}
                           else makeUser (x:xs)
     let namesL = map toUser . splitOn " " $ names
     namesResponse ch namesL

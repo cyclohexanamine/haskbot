@@ -96,7 +96,7 @@ instance SenderC Server where
 
 -- | Commands that will be sent by the bot; deliberately named
 -- identically to their textual representations, to make serialising easy.
-data ClientCmd = NICK | USER | JOIN | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS | KICK | MODE
+data ClientCmd = NICK | USER | JOIN | PING | PONG | PRIVMSG | NAMES | WHOIS | WHOWAS | KICK | MODE
     deriving Show
 
 -- | Message that will be sent by the bot. The structure is fairly barebones
@@ -114,6 +114,7 @@ data CMsg
 -- may have any number of arguments.
 data SEvent
     = SPing { srv :: String }
+    | SPong { srv :: String, srv2 :: String }
     | SNotice { from :: Sender, to :: Recipient, text :: String }
     | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
     | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
@@ -123,6 +124,7 @@ data SEvent
     | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: String }
     | Startup
     | Connected
+    | Disconnected
     deriving (Show, Read, Eq)
 
 -- | Sender field - can be either user or server.
@@ -152,14 +154,14 @@ parseMsg = do src <- optionMaybe $ parseSender
               cmd <- parseWord
               args <- parseArgs
               case cmd of
-                   "PING"    -> if length args > 0 then return . SPing . head $ args
-                                                   else parserFail $ "PING had no arguments"
-                   "JOIN"    -> $(makeNMsg 0) SJoin src args
-                   "PART"    -> $(makeNMsg 0) SPart src args
-                   "MODE"    -> $(makeNMsg 1) SMode src args
-                   "NOTICE"  -> $(makeNMsg 1) SNotice src args
-                   "PRIVMSG" -> $(makeNMsg 1) SPrivmsg src args
-                   "KICK"    -> $(makeNMsg 2) SKick src args
+                   "PING"    -> $(makeNMsg 1) SPing args
+                   "PONG"    -> $(makeNMsg 2) SPong args
+                   "JOIN"    -> $(makeSTMsg 0) SJoin src args
+                   "PART"    -> $(makeSTMsg 0) SPart src args
+                   "MODE"    -> $(makeSTMsg 1) SMode src args
+                   "NOTICE"  -> $(makeSTMsg 1) SNotice src args
+                   "PRIVMSG" -> $(makeSTMsg 1) SPrivmsg src args
+                   "KICK"    -> $(makeSTMsg 2) SKick src args
                    _ -> case (readMaybe cmd :: Maybe Int) of
                             Just n -> return . SNumeric src n $ args
                             Nothing -> parserFail $ "Unexpected command " ++ cmd

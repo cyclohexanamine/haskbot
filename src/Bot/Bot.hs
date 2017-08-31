@@ -35,7 +35,7 @@ module Bot.Bot (
     -- $configkey
     serverHostname, serverPort, botNick, logDest,
     -- $mainkey
-    socketH, callbackList, configFile,
+    socketH, listenThread, callbackList, configFile,
     -- $other
     timerList,
 
@@ -54,6 +54,7 @@ module Bot.Bot (
     liftIO, rstrip,
     ) where
 
+import Control.Concurrent (ThreadId)
 import Control.Monad (liftM)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.State.Strict (MonadState, get, put)
@@ -198,6 +199,8 @@ logDest = CacheKey undefined "LOG" "logfile" :: PersistentKey String
 configFile = GlobalKey undefined "configFile" :: GlobalKey String
 -- | Socket handle
 socketH = GlobalKey undefined "socketH" :: GlobalKey Handle
+-- | Listener thread ID
+listenThread = GlobalKey undefined "listenH" :: GlobalKey ThreadId
 -- | List of callbacks to apply to messages
 callbackList = GlobalKey [] "callbacks" :: GlobalKey [(CallbackHandle, SEvent -> Bot ())]
 
