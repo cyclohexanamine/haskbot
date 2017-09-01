@@ -37,12 +37,13 @@ module Bot.Bot (
     -- $mainkey
     socketH, listenThread, callbackList, configFile,
     -- $other
-    timerList,
+    timerList, priorityTimerList, signalList, readyStatus,
 
     -- * Callback control
     CallbackHandle(..), nilCH,
     addCallback, removeCallback,
-    addTimer, removeTimer, runInS, getEndTime,
+    addTimer, removeTimer, runInS, getEndTime, runInSPriority,
+    signalEvent,
 
     -- * IO
     -- ** Messaging
@@ -166,7 +167,7 @@ removeCallback h = do callbacks <- getGlobal callbackList
 
 
 -- | Add a timer to run the given computation at the given time, returning
--- a handle.
+-- a handle. The computation won't be run until the bot is ready.
 addTimer :: UTCTime -> Bot () -> Bot CallbackHandle
 addTimer time cb = do timers <- getGlobal timerList
                       handle <- liftM CallbackHandle $ liftIO nextRandom
@@ -180,7 +181,7 @@ removeTimer h = do timers <- getGlobal timerList
                    setGlobal timerList . filter (\(h',_,_)->h'/=h) $ timers
 
 -- | Run the given computation in the given number of seconds, returning
--- a handle.
+-- a handle. The computation won't be run until the bot is ready.
 runInS :: Integral a => a -> Bot () -> Bot CallbackHandle
 runInS s cb = do currTime <- liftIO getCurrentTime
                  let diffTime = fromIntegral s
@@ -195,11 +196,33 @@ getEndTime h = do timers <- getGlobal timerList
                     (_,t,_):xs -> return $ Just t
                     __         -> return Nothing
 
+-- | Run the given computation in the given number of seconds, returning
+-- a handle. The computation will be run regardless of ready status.
+runInSPriority :: Integral a => a -> Bot () -> Bot ()
+runInSPriority s cb = do currTime <- liftIO getCurrentTime
+                         let diffTime = fromIntegral s
+                         let newTime = addUTCTime diffTime currTime
+                         modGlobal priorityTimerList (++[(nilCH, newTime, cb)])
+
+-- | Signal an event.
+signalEvent :: SEvent -> Bot ()
+signalEvent ev = modGlobal signalList (++[ev])
+
 
 -- Keys for bot things.
 {- $other __Already initialised__ -}
--- | List of timed callbacks, to be called at the time specified.
+-- | List of timed callbacks, to be called at the time specified. These will
+-- not be called while the bot is not ready.
 timerList = GlobalKey [] "timerList" :: GlobalKey [(CallbackHandle, UTCTime, Bot ())]
+-- | List of timed callbacks, to be called at the time specified regardless of
+-- whether the bot is ready.
+priorityTimerList = GlobalKey [] "priorityTimerList" :: GlobalKey [(CallbackHandle, UTCTime, Bot ())]
+-- | List of events to signal immediately. Events can't be signalled directly within callbacks,
+-- so they're put here and signalled by the event loop.
+signalList = GlobalKey [] "signalList" :: GlobalKey [SEvent]
+-- | Whether we're ready or not - 'ready' means connected to the server, and in all
+-- the autojoin channels. This has to be here so that 'Bot.Run' can see it.
+readyStatus = GlobalKey False "readyStatus" :: GlobalKey Bool
 
 {- $configkey __To be initialised in config:__
     The key strings here map to the relevant keys in .ini, as "SECTION.key": -}

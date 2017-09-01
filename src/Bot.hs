@@ -101,6 +101,6 @@ currChanList = GlobalKey [] "chanList" :: GlobalKey [Channel]
 autoJoinList = CacheKey [] "BOT" "autoJoinList" :: PersistentKey [Channel]
 -- | Character prefixes for users that indicate status in channels; e.g., '@' for op
 -- or '+' for voice.
-statusChars = CacheKey [] "SERVER" "statusChars"
+statusChars = CacheKey [] "SERVER" "statusChars" :: PersistentKey [Char]
 -- | Status prefixes that indicate op privileges.
-statusOpChars = CacheKey [] "SERVER" "statusOpChars"
+statusOpChars = CacheKey [] "SERVER" "statusOpChars" :: PersistentKey [Char]

@@ -8,28 +8,31 @@ responding to pings, joining and leaving channels, and so on.
 module Bot.Scripting.Core (
     callbacks,
     -- * Connection
-    connected, respondToEndOfMOTD,
+    connected, disconnected, manageReadyStatus,
+    respondToEndOfMOTD,
     managePingTimer, pingTimeoutLen,
     pingTimer, respondToPong, pingTimeout,
     -- * Queries
     respondToNAMES, respondToWHOISUSER,
     namesResponse, whoisResponse,
     -- * Nick management
-    acquiredNick, nickservIdent,
+    acquiredNick, nickservIdent, identPassword, nickservAddr,
     -- * Channel management
-    respondToJoin, respondToPart, respondToKick,
+    respondToJoin, respondToPart, respondToKick, unableToJoin, unableToJoinChan,
     -- * Other
     respondToPing,
     ) where
 import Bot
 
 import Control.Concurrent (forkIO, threadDelay, killThread)
-import Data.List (delete)
+import Data.List (delete, (\\))
 import Data.List.Split (splitOn)
 
 
 -- | Event hooks
 callbacks = [ connected
+            , disconnected
+            , manageReadyStatus
 
             , respondToPing
 
@@ -41,6 +44,7 @@ callbacks = [ connected
             , respondToJoin
             , respondToPart
             , respondToKick
+            , unableToJoin
 
             , respondToNAMES
             , respondToWHOISUSER
@@ -54,10 +58,27 @@ handle376 = GlobalKey nilCH "handle376" :: GlobalKey CallbackHandle
 -- | User registration, and set a callback to join channels.
 connected :: SEvent -> Bot ()
 connected (Connected) = do
+    putLogInfo "Connected to server."
     nick <- getGlobal' botNick
     writeMsg $ CMsg NICK [nick]
     writeMsg $ CMsg USER [nick, "0", "*" , nick]
     addCallback respondToEndOfMOTD >>= setGlobal handle376
+
+-- | Remove all the channels from the current channel list.
+disconnected :: SEvent -> Bot ()
+disconnected (Disconnected) = do
+    putLogInfo "Disconnected from server."
+    setGlobal currChanList []
+    signalEvent UnReady
+
+-- | Keep track of ready\/unready status.
+manageReadyStatus (Ready) = do
+    putLogInfo "Now ready."
+    setGlobal readyStatus True
+manageReadyStatus (UnReady) = do
+    putLogInfo "Now unready."
+    setGlobal readyStatus False
+
 
 -- | Join channels on 376 (end of MOTD), and then unhook this callback.
 respondToEndOfMOTD :: SEvent -> Bot ()
@@ -146,12 +167,18 @@ nickservIdent (SNotice sender@(SUser _ _ _) _ _) = do
 
 -- Channel management
 
--- | If it's the bot that's joined, update the current channels list.
+-- | If it's the bot that's joined, update the current channels list. If
+-- we just joined the last remaining channel on the autojoin list, signal 'Ready'.
 respondToJoin (SJoin (SUser nick _ _) ch@(RChannel _)) = do
     ownNick <- getGlobal' botNick
     if nick /= ownNick then return ()
-    else modGlobal currChanList (++[fromR ch])
-         >> putLogInfo ("Joined " ++ show ch)
+    else do modGlobal currChanList (++[fromR ch])
+            putLogInfo ("Joined " ++ show ch)
+            currChans <- getGlobal currChanList
+            autojoin <- getGlobal' autoJoinList
+            if (fromR ch) `elem` autojoin && autojoin \\ currChans == []
+              then signalEvent Ready
+              else return ()
 
 -- | If it's the bot that's parted, update the current channels list.
 respondToPart (SPart (SUser nick _ _) ch@(RChannel _)) = do
@@ -160,12 +187,34 @@ respondToPart (SPart (SUser nick _ _) ch@(RChannel _)) = do
     else modGlobal currChanList (delete (fromR ch))
          >> putLogInfo ("Parted " ++ show ch)
 
--- | If it's the bot that's been kicked, update the current channels list.
+-- | If it's the bot that's been kicked, update the current channels list,
+-- and rejoin the channel after a delay. If this was an autojoin channel,
+-- signal UnReady.
 respondToKick e@(SKick (SUser nick _ _) ch@(RChannel _) target reason) = do
     ownNick <- getGlobal' botNick
     if target /= ownNick then return ()
-    else modGlobal currChanList (delete (fromR ch))
-         >> putLogInfo ("Kicked from "++(show ch)++" by " ++ nick ++ ": " ++ reason)
+    else do modGlobal currChanList (delete (fromR ch))
+            putLogInfo ("Kicked from "++(show ch)++" by " ++ nick ++ ": " ++ reason)
+            autojoin <- getGlobal' autoJoinList
+            if (fromR ch) `elem` autojoin
+              then signalEvent UnReady
+              else return ()
+            runInSPriority 5 $ joinChannels [fromR ch]
+
+-- | If we're unable to join a channel, we want to record why, and then
+-- retry joining in 10 seconds.
+unableToJoinChan chstr n = do
+    putLogWarning $ "Unable to join channel " ++ chstr ++ " - ERR "
+                    ++ show n ++ ". Retrying."
+    runInSPriority 10 $ joinChannels [makeChannel chstr]
+
+-- | Catch all the cases when we're unable to join a channel.
+unableToJoin (SNumeric _ n@471 (_:st:_)) = unableToJoinChan st n
+unableToJoin (SNumeric _ n@473 (_:st:_)) = unableToJoinChan st n
+unableToJoin (SNumeric _ n@474 (_:st:_)) = unableToJoinChan st n
+unableToJoin (SNumeric _ n@475 (_:st:_)) = unableToJoinChan st n
+
+
 
 
 -- | NAMES reply - handles both RPL_NAMREPLY (353) and RPL_ENDOFNAMES (366);

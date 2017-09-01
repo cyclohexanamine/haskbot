@@ -125,6 +125,8 @@ data SEvent
     | Startup
     | Connected
     | Disconnected
+    | Ready
+    | UnReady
     deriving (Show, Read, Eq)
 
 -- | Sender field - can be either user or server.

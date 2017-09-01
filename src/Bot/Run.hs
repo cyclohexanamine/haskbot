@@ -19,7 +19,7 @@ module Bot.Run (
     -- * Networking
     startBot, connectAndListen, listenMain, listenH,
     -- * Callback handling
-    handleLine, applyCallbacks, tryApply, runCallbackSafe, runTimers
+    handleLine, applyCallbacks, tryApply, runCallbackSafe, runTimers, runTimersList
     ) where
 
 import Control.Concurrent (forkIO, threadDelay)
@@ -29,7 +29,7 @@ import Control.DeepSeq (force)
 import Control.Exception (PatternMatchFail, SomeException, evaluate, try)
 import Control.Monad (liftM)
 import Data.Maybe (catMaybes, mapMaybe)
-import Data.Time.Clock (getCurrentTime)
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import Network (PortID(PortNumber), connectTo)
 import System.IO (Handle, BufferMode(LineBuffering), hSetBuffering, hGetLine, hClose)
 import System.IO.Error (isDoesNotExistError, ioError, tryIOError)
@@ -37,19 +37,30 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import Bot.Bot
 import Bot.Msg
+import Bot.Store
 import Bot.Scripting as S (callbacks)
 
 
 -- Callbacks
 
--- | Check all the timers that are outstanding, and run all that have expired.
+-- | Run the priority timers, and run the non-priority timers if the bot
+-- is ready.
 runTimers :: Bot ()
-runTimers = do timers <- getGlobal timerList
-               currTime <- liftIO getCurrentTime
-               let expired = filter (\(h, t, c) -> t < currTime) timers
-               let newTimers = mapMaybe (\a@(h, t, c) -> if t < currTime then Nothing else Just a) timers
-               setGlobal timerList newTimers
-               sequence_ . map runCallbackSafe . map (\(h, t, c)->c) $ expired
+runTimers = do runTimersList priorityTimerList
+               status <- getGlobal readyStatus
+               if status then runTimersList timerList
+                         else return ()
+
+-- | Check all the timers that are outstanding, and run all that have expired,
+-- from the timer list at the given key, updating it appropriately.
+runTimersList :: GlobalKey [(CallbackHandle, UTCTime, Bot ())] -> Bot ()
+runTimersList tl = do
+    timers <- getGlobal tl
+    currTime <- liftIO getCurrentTime
+    let expired = filter (\(h, t, c) -> t < currTime) timers
+    let newTimers = mapMaybe (\a@(h, t, c) -> if t < currTime then Nothing else Just a) timers
+    setGlobal tl newTimers
+    mapM_ runCallbackSafe . map (\(h, t, c)->c) $ expired
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
 handleLine :: String -> Bot ()
@@ -61,7 +72,7 @@ handleLine s = case readMsg s of
 applyCallbacks :: SEvent -> Bot ()
 applyCallbacks msg = do callbacks <- getGlobal callbackList
                         let applicable = catMaybes . map (flip tryApply $ msg) . map snd $ callbacks
-                        sequence_ . map runCallbackSafe $ applicable 
+                        mapM_ runCallbackSafe applicable
 
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
 -- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
@@ -81,6 +92,13 @@ runCallbackSafe cb = do
       Right st -> put st
    where tryAll = try :: IO a -> IO (Either SomeException a)
 
+-- | Invoke callbacks for all the stored signals, clearing the list.
+applySignals :: Bot ()
+applySignals = do
+    sigs <- getGlobal signalList
+    setGlobal signalList []
+    mapM_ applyCallbacks sigs
+
 
 -- Networking
 
@@ -95,7 +113,7 @@ listenH h mv = do
 -- Check whether the socket listener thread has died, and restart things
 -- with a backoff if so.
 -- Otherwise, check whether 'listenH' has read a line, and process that
--- if there is one. Then process any timers.
+-- if there is one. Then process any timers, if the bot is in the 'ready' state.
 listenMain :: MVar String -> Bot ()
 listenMain mv = do
     listenerStatus <- getGlobal listenThread >>= liftIO . threadStatus
@@ -110,6 +128,7 @@ listenMain mv = do
                 Just s -> do putLogDebug $ "< " ++ s
                              handleLine s
                 Nothing -> liftIO $ threadDelay 100000
+              applySignals
               runTimers
               listenMain mv
 
