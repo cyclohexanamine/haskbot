@@ -34,5 +34,4 @@ import qualified Bot.Scripting.Example as Ex
 callbacks :: [SEvent -> Bot ()]
 callbacks = concat [ C.callbacks
                    , V.callbacks
-                   , Ex.callbacks
                    ]
