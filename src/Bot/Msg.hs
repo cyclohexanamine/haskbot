@@ -47,7 +47,7 @@ data User = User { nick :: String -- ^ Nick
                  , user :: Maybe String -- ^ User, if we know it.
                  , host :: Maybe String -- ^ Host, if we know it.
                  , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op). 
-                 } deriving (Eq, Read, Show)
+                 } deriving (Eq, Read, Show, Ord)
 -- | Make a user struct from just a nick.
 makeUser :: String -> User
 makeUser s = User s Nothing Nothing []
@@ -57,14 +57,14 @@ makeUserH :: String -> String -> String -> User
 makeUserH s u h = User s (Just u) (Just h) []
 
 -- | A channel; the string doesn't include the '#' prefix.
-newtype Channel = Channel String deriving (Eq, Read, Show)
+newtype Channel = Channel String deriving (Eq, Read, Show, Ord)
 -- | Take a channel name of the form "#chan" and create a 'Channel'.
 makeChannel (x:xs) = Channel xs
 -- | Turn a 'Channel' into a channel name of the form "#chan".
 channelToStr (Channel c) = "#"++c
 
 -- | A server and its hostname.
-newtype Server = Server String deriving (Eq, Read, Show)
+newtype Server = Server String deriving (Eq, Read, Show, Ord)
 
 -- | Recipient class: 'User' and 'Channel' can both be recipients
 -- in a message (see 'Recipient').
