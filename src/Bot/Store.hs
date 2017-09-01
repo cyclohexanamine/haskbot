@@ -24,7 +24,7 @@ module Bot.Store (
     Typeable,
     ) where
 
-import Data.Dynamic (Dynamic, fromDynamic, toDyn)
+import Data.Dynamic (Dynamic, fromDynamic, toDyn, dynTypeRep)
 import Data.Typeable (Typeable, TypeRep, typeOf)
 import Data.HashMap.Strict as M (HashMap, lookup, member, insert, empty)
 
@@ -64,3 +64,8 @@ setGlobalToStore st k val = M.insert (makeK k) (toDyn val) st
 -- | Check whether the given key is in the given store.
 isInStore :: Typeable a => GlobalStore -> GlobalKey a -> Bool
 isInStore st k = member (makeK k) st
+
+
+-- | Print the type of a value, for error messages.
+showTypeSig :: Typeable a => a -> String
+showTypeSig = show . dynTypeRep . toDyn

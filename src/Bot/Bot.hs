@@ -70,6 +70,7 @@ import Data.UUID (UUID, nil)
 import Data.UUID.V4 (nextRandom)
 
 import Text.Printf (hPrintf)
+import Text.Read (readMaybe)
 import Network (PortNumber)
 import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
 
@@ -257,8 +258,11 @@ getGlobal' (PersistentKey def sec nm) = do
     iniE <- liftIO $ I.readIniFile cfg
     case iniE >>= lookupValue (pack sec) (pack nm) of
       Left err -> return def
-      Right t -> do
-        return (read . unpack $ t)
+      Right t -> case readMaybe . unpack $ t of
+                   Just v -> return v
+                   Nothing -> error $ "Bad string in config file for "++sec
+                                ++"."++nm++" - couldn't read a value of type "
+                                ++showTypeSig def++" from string " ++show (unpack t)
 getGlobal' k@(CacheKey _ _ _) = do
     st <- get
     let gk = toGlobalKey k
