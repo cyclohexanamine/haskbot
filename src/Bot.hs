@@ -89,8 +89,7 @@ getWhowas User{nick=n} cb = do
 getOwnStatus :: Channel -> (Maybe Char -> Bot ()) -> Bot ()
 getOwnStatus ch cb = do
     ownNick <- getGlobal' botNick
-    getNames ch $ \userL -> do
-        putLogInfo . show $ userL
+    getNames ch $ \userL ->
         cb $ do User{statusCharL=scl} <- find ((==ownNick).nick) userL
                 lookup ch scl
 

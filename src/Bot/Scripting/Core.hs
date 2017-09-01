@@ -115,7 +115,7 @@ respondToPong (SPong _ _) = do
 pingTimeout :: Bot ()
 pingTimeout = do
     tm <- getGlobal' pingTimeoutLen
-    putLogWarning $ "Ping timeout: " ++ show tm ++ " seconds."
+    putLogInfo $ "Ping timeout: " ++ show tm ++ " seconds."
     getGlobal listenThread >>= liftIO . killThread
 
 

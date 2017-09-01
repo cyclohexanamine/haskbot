@@ -33,7 +33,7 @@ module Bot.Bot (
 
     -- ** Bot-specific keys for global store
     -- $configkey
-    serverHostname, serverPort, botNick, logDest,
+    serverHostname, serverPort, botNick, logDest, logLevel,
     -- $mainkey
     socketH, listenThread, callbackList, configFile,
     -- $other
@@ -48,7 +48,7 @@ module Bot.Bot (
     -- ** Messaging
     writeMsg,
     -- ** Logging
-    putLog, putLogInfo, putLogWarning, putLogError,
+    putLog, putLogAll, putLogDebug, putLogInfo, putLogWarning, putLogError, putLogCritical,
 
     -- * Re-exported for convenience
     get, put, liftIO, rstrip,
@@ -65,6 +65,7 @@ import Data.Time.Clock (UTCTime, getCurrentTime, addUTCTime)
 import Data.Ini as I (Ini(..), readIniFile, writeIniFile, lookupValue, unIni)
 import Data.Text (pack, unpack)
 import Data.HashMap.Lazy as M (lookupDefault, insert, empty)
+import Data.List (elemIndex)
 import Data.UUID (UUID, nil)
 import Data.UUID.V4 (nextRandom)
 
@@ -111,7 +112,7 @@ writeMsg :: CMsg -> Bot ()
 writeMsg msg = do let msgString = joinMsg msg
                   h <- getGlobal socketH
                   liftIO . hPrintf h $ msgString
-                  putLogInfo $ "> " ++ rstrip msgString
+                  putLogDebug $ "> " ++ rstrip msgString
 
 
 -- | Write a line out to the log, prepended with a timestamp.
@@ -119,16 +120,28 @@ putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
           -> String -- ^ Line
           -> Bot ()
 putLog lvl s = do logFile <- getGlobal' logDest
-                  timestamp <- liftIO getCurrentTime
-                  let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s
-                  liftIO . putStrLn $ s
-                  liftIO . appendFile logFile $ logLine
+                  logLvl <- getGlobal' logLevel
+                  case do { i <- elemIndex lvl logLevels; i' <- elemIndex logLvl logLevels;
+                            if i >= i' then return True else fail "" } of
+                    Nothing -> return ()
+                    Just _ -> do
+                      timestamp <- liftIO getCurrentTime
+                      let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s
+                      liftIO . putStrLn $ s
+                      liftIO . appendFile logFile $ logLine
+  where logLevels = ["ALL", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+-- | Log with level ALL.
+putLogAll = putLog "ALL"
+-- | Log with level DEBUG.
+putLogDebug = putLog "DEBUG"
 -- | Log with level INFO.
 putLogInfo = putLog "INFO"
 -- | Log with level WARNING.
 putLogWarning = putLog "WARNING"
 -- | Log with level ERROR.
 putLogError = putLog "ERROR"
+-- | Log with level CRITICAL.
+putLogCritical = putLog "CRITICAL"
 
 
 -- | A callback handle referring to callbacks; internally a randomly-generated
@@ -196,7 +209,16 @@ serverPort = CacheKey undefined "SERVER" "port" :: PersistentKey Integer
 -- | Nick of bot.
 botNick = CacheKey undefined "BOT" "nick" :: PersistentKey String
 -- | Logging output filename.
-logDest = CacheKey undefined "LOG" "logfile" :: PersistentKey String
+logDest = CacheKey undefined "LOG" "logFile" :: PersistentKey String
+-- | Minimum logging level to record. Log levels are
+--
+-- * 'CRITICAL' - some unrecoverable error for the whole bot, probably crashing it.
+-- * 'ERROR' - something has gone wrong, possibly an exception in a callback.
+-- * 'WARNING' - something bad but expectable has happened.
+-- * 'INFO' - something of interest has happened.
+-- * 'DEBUG' - verbose output, but still human-readable.
+-- * 'ALL' - very verbose.
+logLevel = CacheKey "INFO" "LOG" "logLevel" :: PersistentKey String
 
 {- $mainkey __To be initialised elsewhere before running ('Bot.Run.startBot'):__ -}
 -- | Config file filename.

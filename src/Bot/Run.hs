@@ -55,7 +55,7 @@ runTimers = do timers <- getGlobal timerList
 handleLine :: String -> Bot ()
 handleLine s = case readMsg s of
     Left err -> putLogWarning ("Couldn't parse message - " ++ show err ++ " - " ++ s)
-    Right msg -> applyCallbacks msg
+    Right msg -> putLogAll (show msg) >> applyCallbacks msg
 
 -- | Apply all message callbacks in 'callbackList' which pattern-match the message.
 applyCallbacks :: SEvent -> Bot ()
@@ -100,14 +100,14 @@ listenMain :: MVar String -> Bot ()
 listenMain mv = do
     listenerStatus <- getGlobal listenThread >>= liftIO . threadStatus
     if listenerStatus `elem` [ThreadFinished, ThreadDied]
-      then do putLogWarning "Disconnected. Thread listener died; restarting..."
+      then do putLogInfo "Disconnected. Thread listener died; restarting..."
               liftIO $ threadDelay 1000000
               getGlobal socketH >>= liftIO . hClose
               applyCallbacks Disconnected
               connectAndListen
       else do mbLine <- liftIO . tryTakeMVar $ mv
               case mbLine of
-                Just s -> do putLogInfo $ "< " ++ s
+                Just s -> do putLogDebug $ "< " ++ s
                              handleLine s
                 Nothing -> liftIO $ threadDelay 100000
               runTimers
@@ -134,7 +134,7 @@ connectAndListen = do
 
       Left e ->
         if isDoesNotExistError e
-          then do putLogWarning "Couldn't connect to host; retrying"
+          then do putLogInfo "Couldn't connect to host; retrying"
                   liftIO $ threadDelay 10000000
                   connectAndListen
           else liftIO . ioError $ e

@@ -90,7 +90,7 @@ processCommand ev@(SPrivmsg (SUser _ _ _) ch@(RChannel _) text)
     = do vChan <- getGlobal' voteChan
          if (fromR ch) /= vChan then return ()
          else case parse parseCommand "" . tail $ text of
-            Left err -> putLogError $ "Vote command parse error: " ++ show err
+            Left err -> putLogWarning $ "Vote command parse failure: " ++ show err
             Right act -> act ev
     | otherwise
     = return ()
@@ -316,7 +316,7 @@ parseVoteCmd = do start <- parseUntil' " "
 validateVote :: Channel -> String -> Bot (Maybe VoteOpt)
 validateVote ch text = do
     case parse parseVoteCmd "" text of
-        Left err -> putLogError (show err) >> return Nothing
+        Left err -> putLogError ("Parse error in parseVoteCmd: " ++ show err) >> return Nothing
         Right (Left msg) -> sendMessage ch msg >> return Nothing
         Right (Right (act, targ, lenMb, reasonMb)) -> do
             actSettingMb <- findAct act
