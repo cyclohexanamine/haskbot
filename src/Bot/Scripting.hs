@@ -29,6 +29,7 @@ import Bot.Msg (SEvent)
 import qualified Bot.Scripting.Core as C
 import qualified Bot.Scripting.Vote as V
 import qualified Bot.Scripting.Flood as F
+import qualified Bot.Scripting.Laws as L
 import qualified Bot.Scripting.Example as Ex
 
 -- | The list of callbacks the bot should try to apply.
@@ -36,4 +37,5 @@ callbacks :: [SEvent -> Bot ()]
 callbacks = concat [ C.callbacks
                    , V.callbacks
                    , F.callbacks
+                   , L.callbacks
                    ]

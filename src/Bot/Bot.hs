@@ -29,7 +29,8 @@ module Bot.Bot (
 
     -- * Global storage
     PersistentKey(..),
-    getGlobal, setGlobal, modGlobal, getGlobal', setGlobal', modGlobal',
+    getGlobal, setGlobal, modGlobal, consumeGlobal,
+    getGlobal', setGlobal', modGlobal',
 
     -- ** Bot-specific keys for global store
     -- $configkey
@@ -108,6 +109,14 @@ modGlobal :: Typeable a => GlobalKey a -> (a -> a) -> Bot ()
 modGlobal k f = do v <- getGlobal k
                    setGlobal k (f v)
 
+-- | Return the values in the list at k that satisfy the predicate f,
+-- removing those values from the list.
+consumeGlobal :: Typeable a => GlobalKey [a] -> (a -> Bool) -> Bot [a]
+consumeGlobal k f = do l <- getGlobal k
+                       let keep = filter (not . f) l
+                           ret  = filter f l
+                       setGlobal k keep
+                       return ret
 
 -- | Write a message out to the server.
 writeMsg :: CMsg -> Bot ()
@@ -278,6 +287,11 @@ toPersKey (CacheKey d s n) = PersistentKey d s n
 -- the typeclass restrictions are stronger than 'getGlobal'.
 getGlobal' :: (Eq a, Read a, Show a, Typeable a) => PersistentKey a -> Bot a
 getGlobal' (PersistentKey def sec nm) = do
+    if not $ sec `elem` ["BOT", "LOG", "SERVER"]
+      then do putLogAll $ sec++"."++nm
+              putLogAll . show $ def
+              putLogAll . showTypeSig $ def
+      else return ()
     cfg <- getGlobal configFile
     iniE <- liftIO $ I.readIniFile cfg
     case iniE >>= lookupValue (pack sec) (pack nm) of

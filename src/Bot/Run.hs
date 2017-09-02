@@ -55,11 +55,8 @@ runTimers = do runTimersList priorityTimerList
 -- from the timer list at the given key, updating it appropriately.
 runTimersList :: GlobalKey [(CallbackHandle, UTCTime, Bot ())] -> Bot ()
 runTimersList tl = do
-    timers <- getGlobal tl
     currTime <- liftIO getCurrentTime
-    let expired = filter (\(h, t, c) -> t < currTime) timers
-    let newTimers = mapMaybe (\a@(h, t, c) -> if t < currTime then Nothing else Just a) timers
-    setGlobal tl newTimers
+    expired <- consumeGlobal tl (\(h, t, c) -> t < currTime)
     mapM_ runCallbackSafe . map (\(h, t, c)->c) $ expired
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
@@ -95,8 +92,7 @@ runCallbackSafe cb = do
 -- | Invoke callbacks for all the stored signals, clearing the list.
 applySignals :: Bot ()
 applySignals = do
-    sigs <- getGlobal signalList
-    setGlobal signalList []
+    sigs <- consumeGlobal signalList (const True)
     mapM_ applyCallbacks sigs
 
 

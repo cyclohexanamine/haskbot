@@ -13,7 +13,7 @@ module Bot.Scripting.Core (
     managePingTimer, pingTimeoutLen,
     pingTimer, respondToPong, pingTimeout,
     -- * Queries
-    respondToNAMES, respondToWHOISUSER,
+    respondToNAMES, respondToWHOISUSER, respondToWHOWASUSER,
     namesResponse, whoisResponse,
     -- * Nick management
     acquiredNick, nickservIdent, identPassword, nickservAddr,
@@ -48,6 +48,7 @@ callbacks = [ connected
 
             , respondToNAMES
             , respondToWHOISUSER
+            , respondToWHOWASUSER
             ]
 
 
@@ -234,24 +235,38 @@ respondToNAMES (SNumeric _ 366 [_,_,ch,_]) = namesResponse ch []
 -- | Find the requester for the NAMES query, unhook and invoke it.
 namesResponse :: String -> [User] -> Bot ()
 namesResponse ch cL = do
-    cbs <- getGlobal nameCallbacks
-    let shouldRun = [t | t@(c, cb) <- cbs, "#"++c == ch]
-    let shouldKeep = [t | t@(c, cb) <- cbs, "#"++c /= ch]
-    setGlobal nameCallbacks shouldKeep
-    mapM_ (($cL) . snd) shouldRun
+    cbs <- consumeGlobal nameCallbacks (\(c, cb) -> "#"++c == ch)
+    mapM_ (($cL) . snd) cbs
 
--- | WHOIS reply - like 'respondToNAMES', this handles both RPL_WHOISUSER (311)
--- and RPL_ENDOFWHOIS (318). It also handles the equivalent WHOWAS responses,
--- since they're virtually identical - RPL_WHOWASUSER (314) and RPL_ENDOFWHOWAS
--- (369).
-respondToWHOISUSER (SNumeric _ 311 [_,n,u,h,_,realName]) = whoisResponse n . Just $ makeUserH n u h
-respondToWHOISUSER (SNumeric _ 318 [_,n,_]) = whoisResponse n Nothing
-respondToWHOISUSER (SNumeric _ 314 [_,n,u,h,_,realName]) = whoisResponse n . Just $ makeUserH n u h
-respondToWHOISUSER (SNumeric _ 369 [_,n,_]) = whoisResponse n Nothing
+
+whoisTempReplies = GlobalKey [] "whoisTempReplies" :: GlobalKey [(String, User)]
+
+-- | WHOIS reply - like 'respondToNAMES', this handles RPL_WHOISUSER (311), RPL_WHOISCHANNELS
+-- (319) and RPL_ENDOFWHOIS (318). We keep a list of intermediate responses which we update
+-- when we get a 311 and 319, and invoke the callbacks on whatever we've stored when
+-- a 318 arrives.
+respondToWHOISUSER (SNumeric _ 311 [_,n,u,h,_,realName]) =
+    modGlobal whoisTempReplies (++[(n, makeUserH n u h)])
+respondToWHOISUSER (SNumeric _ 319 [_,n,chanL]) = do
+    chrs <- getGlobal' statusChars
+    let toSC (x:xs) = if x `elem` chrs then (makeChannel xs,x) else (makeChannel $ x:xs,' ')
+        sCL = map toSC . splitOn " " $ chanL
+    modGlobal whoisTempReplies $ map (\(n',u) -> if n'==n then (n', u {statusCharL=sCL}) else (n',u))
+respondToWHOISUSER (SNumeric _ 318 [_,n,_]) = do
+    tr <- consumeGlobal whoisTempReplies ((n==).fst)
+    if length tr == 0 then whoisResponse n Nothing
+    else mapM_ (\(n,u) -> whoisResponse n (Just u)) tr
+
+-- | WHOWAS reply - like 'respondToNAMES', this handles both RPL_WHOWASUSER (314)
+-- and RPL_ENDOFWHOWAS (369). Handle and . Unlike WHOIS, we're never going to get a
+-- list of channels, so we don't need to store any intermediate callbacks.
+respondToWHOWASUSER (SNumeric _ 314 [_,n,u,h,_,realName]) = whoisResponse n . Just $ makeUserH n u h
+respondToWHOWASUSER (SNumeric _ 369 [_,n,_]) = whoisResponse n Nothing
 
 -- | Find the requester for the WHOIS\/WHOWAS query, unhook and invoke it.
 whoisResponse :: String -> Maybe User -> Bot ()
 whoisResponse n userMb = do
+    putLogDebug $ "Whois response: " ++ show n ++ " - " ++ show userMb
     cbs <- getGlobal whoisCallbacks
     let shouldRun = [t | t@(u, cb) <- cbs, u == n]
     let shouldKeep = [t | t@(u, cb) <- cbs, u /= n]

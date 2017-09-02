@@ -47,7 +47,7 @@ import Bot.Msg.Splices
 data User = User { nick :: String -- ^ Nick
                  , user :: Maybe String -- ^ User, if we know it.
                  , host :: Maybe String -- ^ Host, if we know it.
-                 , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op).
+                 , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op). A space here means no status.
                  } deriving (Eq, Read, Show, Ord)
 -- | Make a user struct from just a nick.
 makeUser :: String -> User
@@ -120,6 +120,7 @@ data SEvent
     | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
     | SJoin { from :: Sender, to :: Recipient }
     | SPart { from :: Sender, to :: Recipient }
+    | SNick { from :: Sender, newNick :: String }
     | SKick { from :: Sender, to :: Recipient, target :: String, reason :: String }
     | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: [(Bool, Char, [String])] }
     | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
@@ -159,6 +160,7 @@ parseMsg = do src <- optionMaybe $ parseSender
               case cmd of
                    "PING"    -> $(makeNMsg 1) SPing args
                    "PONG"    -> $(makeNMsg 2) SPong args
+                   "NICK"    -> $(makeSMsg 1) SNick src args
                    "JOIN"    -> $(makeSTMsg 0) SJoin src args
                    "PART"    -> $(makeSTMsg 0) SPart src args
                    "NOTICE"  -> $(makeSTMsg 1) SNotice src args
@@ -220,7 +222,7 @@ readRecipient :: String -> Either ParseError Recipient
 readRecipient = parse parseRecipient ""
 
 -- | Parse a MODE message given the sender and arguments. The MODE message
--- has fairly complex syntax unsuited for one of the common splices in 
+-- has fairly complex syntax unsuited for one of the common splices in
 -- 'Bot.Msg.Splices'.
 parseMode :: Maybe Sender -> [String] -> Parser SEvent
 parseMode s a = case do
