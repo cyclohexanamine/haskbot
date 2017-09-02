@@ -1,6 +1,9 @@
 {-| Module: Bot.Scripting.Vote
 
-The voting logic.
+Democratic moderation module. Allows users in a channel to vote to take
+moderation actions, such as kicking, banning or unbanning users. The bot
+can issue temporary bans, and will unban them robustly. Saying "!voteinfo"
+in the vote channel will issue help.
 -}
 module Bot.Scripting.Vote (
     callbacks, voteChan, actionSettings, onStartup,
@@ -55,6 +58,7 @@ callbacks = [ processCommand, onStartup ]
 -- Persistent values holding information about voting, the current vote, etc.
 -- | The channel the bot should take votes in.
 voteChan = CacheKey (Channel "") "VOTE" "voteChan"
+commandChar = CacheKey '!' "VOTE" "commandChar"
 
 voteTimer = GlobalKey nilCH "voteTimer" :: GlobalKey CallbackHandle
 voteOpts = CacheKey Nothing "VOTE" "voteOpts" :: PersistentKey (Maybe VoteOpt)
@@ -63,7 +67,6 @@ noHosts = CacheKey [] "VOTE" "noHosts" :: PersistentKey [String]
 lastVote = CacheKey VYes "VOTE" "lastVote" :: PersistentKey VoteChoice
 banTimers = CacheKey [] "VOTE" "banTimers" :: PersistentKey [(UTCTime, Channel, [String])]
 
-commandChar = '!'
 -- | The commands a user can give in the channel.
 commands = [ ("vote", vote)
            , ("yes", castVote VYes)
@@ -77,6 +80,7 @@ commands = [ ("vote", vote)
 -- Also, clear the current vote for dev purposes.
 onStartup :: SEvent -> Bot ()
 onStartup Startup = do
+    getGlobal' banTimers >>= \l -> putLogDebug $ "Reinstating ban timers: " ++ show l
     getGlobal' banTimers >>= mapM_ (\(t, ch, targs) -> addTimer t (enactUnban ch targs))
     setGlobal' voteOpts Nothing
 
@@ -86,19 +90,19 @@ onStartup Startup = do
 processCommand :: SEvent -> Bot()
 processCommand ev@(SPrivmsg (SUser _ _ _) ch@(RChannel _) text)
     | length text /= 0
-    , head text == commandChar
     = do vChan <- getGlobal' voteChan
-         if (fromR ch) /= vChan then return ()
+         commandCh <- getGlobal' commandChar
+         if (fromR ch) /= vChan || head text /= commandCh then return ()
          else case parse parseCommand "" . tail $ text of
             Left err -> putLogWarning $ "Vote command parse failure: " ++ show err
             Right act -> act ev
-    | otherwise
-    = return ()
+    | otherwise = return ()
 
 
 -- | !vote - command to start a vote.
 vote :: SEvent -> Bot ()
-vote (SPrivmsg usr ch text) = do
+vote ev@(SPrivmsg usr ch text) = do
+    putLogDebug $ "Vote command received: " ++ show ev
     currOptsMb <- getGlobal' voteOpts
     newOptsMb <- validateVote (fromR ch) text
     if isJust currOptsMb then sendMessage ch "Vote already active"
@@ -109,7 +113,8 @@ vote (SPrivmsg usr ch text) = do
 
 -- | Look up the target - a whois\/whowas for kick\/banning, or checking if they're in the channel for a kick.
 findTarget :: VoteOpt -> Bot ()
-findTarget o@VoteOpt{targetO=targ} =
+findTarget o@VoteOpt{targetO=targ} = do
+    putLogDebug $ "Finding target for " ++ show o
     if useHostAS . actionO $ o
     then getWhois (makeUser targ) $ \mbUser ->
         case mbUser of
@@ -144,7 +149,8 @@ data VoteChoice = VYes | VNo
 -- | !yes or !no - vote yes or no, checking the user's host to see if they've already
 -- voted.
 castVote :: VoteChoice -> SEvent -> Bot ()
-castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
+castVote choice (SPrivmsg u@(SUser nick _ host) ch _) = do
+    putLogInfo $ "Received vote " ++ show choice ++ " from " ++ show u
     vChan <- getGlobal' voteChan
     let choices = case choice of VYes -> (yesHosts, noHosts)
                                  VNo -> (noHosts, yesHosts)
@@ -169,7 +175,8 @@ castVote choice (SPrivmsg (SUser nick _ host) ch _) = do
 
 
 -- | Send info about the current vote.
-voteInfo (SPrivmsg (SUser nick _ host) c@(RChannel ch) _) = do
+voteInfo (SPrivmsg u@(SUser nick _ host) c@(RChannel ch) _) = do
+    putLogDebug $ "Vote info request from " ++ show u
     (Channel vc) <- getGlobal' voteChan
     optsMb <- getGlobal' voteOpts
     yesL <- getGlobal' yesHosts
@@ -208,11 +215,11 @@ voteEnd :: Bot ()
 voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
   Nothing -> return ()
   Just opts -> do
-    putLogInfo $ "Ending vote: " ++ show opts
     yesC <- getGlobal' yesHosts >>= return . fromIntegral . length
     noC <- getGlobal' noHosts >>= return . fromIntegral . length
     lastV <- getGlobal' lastVote
     ch <- getGlobal' voteChan
+    putLogInfo $ "Ending vote: " ++ show opts ++ "; Vote results: " ++show [yesC, noC] ++ ", " ++ show lastV
     let act = actionO opts
     setGlobal' voteOpts Nothing
     if yesC + noC < (voteThresholdAS act)
@@ -232,6 +239,7 @@ voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
 -- | Carry out the vote action.
 enactVote :: VoteOpt -> Bot ()
 enactVote opts = do
+    putLogInfo $ "Enacting vote " ++ show opts
     ch <- getGlobal' voteChan
     opchs <- getGlobal' statusOpChars
     let reasonStr = "Voted" ++ case reasonO opts of Just s -> ": " ++ s
@@ -254,6 +262,7 @@ enactVote opts = do
 
 enactUnban :: Channel -> [String] -> Bot ()
 enactUnban ch targetMasks = do
+    putLogInfo $ "Unbanning " ++ show targetMasks
     opchs <- getGlobal' statusOpChars
     getOwnStatus ch $ \resp ->
         if isNothing resp || not ((fromJust resp) `elem` opchs)
@@ -265,7 +274,8 @@ enactUnban ch targetMasks = do
 
 -- | Show a help message giving some details about voting.
 voteHelp :: SEvent -> Bot ()
-voteHelp (SPrivmsg (SUser nick _ host) ch _) = do
+voteHelp (SPrivmsg u@(SUser nick _ _) ch _) = do
+    putLogDebug $ "Vote help request from " ++ show u
     kickA <- findAct "kick" >>= return . fromJust
     banA <- findAct "ban" >>= return . fromJust
     permabanA <- findAct "permaban" >>= return . fromJust

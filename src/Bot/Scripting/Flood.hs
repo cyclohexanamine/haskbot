@@ -2,12 +2,12 @@
 
 Flood control. There are three parameters: 'timeWindow', 'linesWeight',
 'charsWeight'. The bot will kick anyone who, in a single channel, posts enough
-messages within 'timeWindow' seconds such that `number-of-lines * linesWeight
- + number-of-characters * charsWeight > 1'.
+messages within 'timeWindow' seconds such that @number-of-lines * linesWeight
+ + number-of-characters * charsWeight > 1@.
 
 e.g., if you want the bot to kick anyone who sends more then 6 lines in a
-5 second window, set `timeWindow = 5', `linesWeight = 0.1667 (1\/6)',
-`charsWeight = 0.0'.
+5 second window, set @timeWindow = 5@, @linesWeight = 0.1667 (1\/6)@,
+@charsWeight = 0.0@.
 
 The bot will only do this in 'channels'.
 
@@ -37,8 +37,8 @@ charsWeight = CacheKey 0.0 "FLOOD" "charsWeight" :: PersistentKey Float
 timeWindow = CacheKey 0 "FLOOD" "timeWindow" :: PersistentKey Int
 
 -- | Message history is stored per user per channel, in a 'Map' with
--- keys '(Channel, User)'. The values are lists of '(time message was sent,
--- number of characters in message)' for each message sent by that user to
+-- keys @(Channel, User)@. The values are lists of @(time message was sent,
+-- number of characters in message)@ for each message sent by that user to
 -- that channel and received by the bot within 'timeWindow'.
 type MessageMap = M.Map (Channel, User) [(UTCTime, Int)]
 messageMap = GlobalKey M.empty "messageMap" :: GlobalKey MessageMap
@@ -81,6 +81,9 @@ isFlooding k = do
     let ll = M.findWithDefault [] k m
     let score = lW * (fromIntegral . length $ ll) + cW * (sum . map (fromIntegral.snd) $ ll)
     putLogAll $ "Flood score for " ++ show k ++ " - " ++ show score
+    if score > 1.0 then putLogDebug $"Flood detected: " ++ show [lW, cW] ++ show [length ll, sum . map snd $ ll]
+                                     ++ " Message history: " ++ show m
+                   else return ()
     return $ score > 1.0
 
 -- | Kick a user for flooding.

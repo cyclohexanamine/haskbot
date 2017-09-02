@@ -114,10 +114,9 @@ listenMain :: MVar String -> Bot ()
 listenMain mv = do
     listenerStatus <- getGlobal listenThread >>= liftIO . threadStatus
     if listenerStatus `elem` [ThreadFinished, ThreadDied]
-      then do putLogInfo "Disconnected. Thread listener died; restarting..."
+      then do applyCallbacks Disconnected
               liftIO $ threadDelay 1000000
               getGlobal socketH >>= liftIO . hClose
-              applyCallbacks Disconnected
               connectAndListen
       else do mbLine <- liftIO . tryTakeMVar $ mv
               case mbLine of
@@ -135,6 +134,7 @@ connectAndListen :: Bot ()
 connectAndListen = do
     host <- getGlobal' serverHostname
     port <- getGlobal' serverPort
+    putLogInfo $ "Connecting to " ++ host ++ " " ++ show port
     hOrErr <-  liftIO . tryIOError $ (connectTo host . PortNumber . fromInteger $ port)
     case hOrErr of
       Right h -> do
@@ -159,6 +159,7 @@ connectAndListen = do
 -- 'connectAndListen'.
 startBot :: Bot ()
 startBot = do
+    putLogInfo "Bot starting up."
     mapM_ addCallback S.callbacks
     applyCallbacks Startup
     connectAndListen

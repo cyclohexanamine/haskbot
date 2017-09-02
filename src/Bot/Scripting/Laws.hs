@@ -14,13 +14,10 @@ module Bot.Scripting.Laws (
     -- ** Logic
     listenNick, listenJoin, handleNickEv,
     grace, punish,
-
     ) where
 
-import Bot
-
 import Data.List (lookup, intersect)
-
+import Bot
 
 -- | Event hooks
 callbacks = [ listenNick
@@ -47,9 +44,12 @@ warningMessage = CacheKey "" "LAWS" "warningMessage" :: PersistentKey String
 -- see whether there are any that are in our 'channels' list, calling 'handleNickEv'
 -- if so.
 listenNick :: SEvent -> Bot ()
-listenNick (SNick (SUser _ _ host) newnick) = getWhois (makeUser newnick) resp
+listenNick (SNick (SUser nick _ host) newnick) = do
+    putLogDebug $ "User " ++ nick ++ "@" ++ host ++ " nicked to " ++ newnick
+    getWhois (makeUser newnick) resp
   where resp Nothing = return ()
-        resp (Just User {statusCharL=ch}) = do
+        resp (Just u@(User {statusCharL=ch})) = do
+            putLogDebug $ "Whois returned: " ++ show u
             chans <- getGlobal' channels
             let relevantChans = chans `intersect` (map fst ch)
             mapM_ (\ch -> handleNickEv ch newnick host) relevantChans
@@ -57,18 +57,18 @@ listenNick (SNick (SUser _ _ host) newnick) = getWhois (makeUser newnick) resp
 -- | Listen for a join event, checking whether the channel is in our 'channels' list and
 -- calling 'handleNickEv' if so.
 listenJoin (SJoin (SUser nick _ host) ch@(RChannel _)) = do
+    putLogDebug $ "User " ++ nick ++ "@" ++ host ++ " joined " ++ show ch
     chans <- getGlobal' channels
     if not $ (fromR ch) `elem` chans then return ()
     else handleNickEv (fromR ch) nick host
 
--- | 'handleNickEv ch newnick host': Handle a nick event in the given channel 'ch'.
+-- | @handleNickEv ch newnick host@: Handle a nick event in the given channel 'ch'.
 -- The user with nick 'newnick' and host 'host' has changed nicks or joined the channel.
 -- Check if their nick contains a forbidden character, and if so, deal with it - look up
 -- the number of offences they've already made (by their host), warning them if they're
 -- under the threshold for instakick ('graceOffences') and instakicking them if they're over.
 handleNickEv :: Channel -> String -> String -> Bot ()
 handleNickEv ch newnick host  = do
-    putLogDebug $ "Nick event in " ++ show ch ++ ": " ++ newnick ++ " " ++ host
     forbid <- getGlobal' forbiddenChars
     exceptions <- getGlobal' exceptionsL
     if newnick `intersect` forbid == [] || newnick `elem` exceptions then return ()
@@ -78,6 +78,8 @@ handleNickEv ch newnick host  = do
       modGlobal' offendersL . setAssoc host $ offences + 1
       if offences < graceN then grace ch newnick
       else punish ch newnick
+      putLogDebug $ "Nick event in " ++ show ch ++ ": " ++ newnick ++ " " ++ host
+      putLogDebug $ "Took action: " ++ show offences ++ " " ++ show graceN
 
 -- | Warn a user, and set a timer to kick them soon.
 grace :: Channel -> String -> Bot ()
@@ -87,11 +89,13 @@ grace ch nick = do
     sendMessage ch $ nick ++ ": " ++ msg ++ " I will kick you in "++ show time ++ " seconds"
                      ++ " if you don't change your nick or leave the channel."
     runInS time $ punish ch nick
-    return ()
+    putLogDebug $ "Sending grace to " ++ nick
 
 -- | Kick a user.
 punish :: Channel -> String -> Bot ()
-punish ch nick = kickUserFor ch (makeUser nick) "Forbidden characters in nick."
+punish ch nick = do
+    kickUserFor ch (makeUser nick) "Forbidden characters in nick."
+    putLogDebug $ "Punishing " ++ nick
 
 
 lookupDefault k def l = case lookup k l of Just x -> x
