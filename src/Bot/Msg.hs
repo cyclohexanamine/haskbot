@@ -181,8 +181,15 @@ parseUntil s = many1 $ do notFollowedBy eof
 
 -- | Parse until one of @space@ @:@ @\r@ @\n@ @eof@, and eat a trailing space
 -- if it's there.
+parseWord' :: Parser String
+parseWord' = do str <- parseUntil " :\r\n"
+                optionMaybe . char $ ' '
+                return str
+
+-- | Parse until one of @space@ @\r@ @\n@ @eof@, and eat a trailing space
+-- if it's there.
 parseWord :: Parser String
-parseWord = do str <- parseUntil " :\r\n"
+parseWord = do str <- parseUntil " \r\n"
                optionMaybe . char $ ' '
                return str
 
@@ -207,7 +214,7 @@ parseRecipient = channel <|> user
 
 -- | Parse the arguments at the end of the message.
 parseArgs :: Parser [String]
-parseArgs = do args <- many parseWord
+parseArgs = do args <- many parseWord'
                lastArg <- optionMaybe $ do char ':'
                                            many . noneOf $ "\r\n"
                manyTill (oneOf "\r\n") eof
