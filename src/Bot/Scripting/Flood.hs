@@ -80,7 +80,7 @@ isFlooding k = do
     cW <- getGlobal' charsWeight
     let ll = M.findWithDefault [] k m
     let score = lW * (fromIntegral . length $ ll) + cW * (sum . map (fromIntegral.snd) $ ll)
-    putLogDebug $ "Flood score for " ++ show k ++ " - " ++ show score
+    putLogAll $ "Flood score for " ++ show k ++ " - " ++ show score
     return $ score > 1.0
 
 -- | Kick a user for flooding.

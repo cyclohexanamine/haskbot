@@ -117,16 +117,17 @@ writeMsg msg = do let msgString = joinMsg msg
                   putLogDebug $ "> " ++ rstrip msgString
 
 
--- | Write a line out to the log, prepended with a timestamp.
+-- | Write a line out to the log, prepended with a timestamp, if the log
+-- level is the same or greater than the one set by 'logLevel'.
 putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
           -> String -- ^ Line
           -> Bot ()
-putLog lvl s = do logFile <- getGlobal' logDest
-                  logLvl <- getGlobal' logLevel
+putLog lvl s = do logLvl <- getGlobal' logLevel
                   case do { i <- elemIndex lvl logLevels; i' <- elemIndex logLvl logLevels;
                             if i >= i' then return True else fail "" } of
                     Nothing -> return ()
                     Just _ -> do
+                      logFile <- getGlobal' logDest
                       timestamp <- liftIO getCurrentTime
                       let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s
                       liftIO . putStrLn $ s

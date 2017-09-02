@@ -15,7 +15,7 @@ within a callback. Client messages can be sent generically, as a stock 'CMsg'.
 module Bot.Msg (
     -- * Message structure
     -- ** Generic
-    User(..), Channel(..), Server(..), 
+    User(..), Channel(..), Server(..),
     SenderC, RecipientC,
     fromS, fromR, toR,
     makeUser, makeUserH,
@@ -29,24 +29,25 @@ module Bot.Msg (
     joinMsg, readMsg,
     -- * Parsing internals
     parseMsg, parseSender, parseRecipient, parseArgs,
-    parseUntil, parseWord,
+    parseUntil, parseWord, parseMode,
     ) where
 
 import Text.ParserCombinators.Parsec
 import Text.Parsec.Prim (parserFail)
 import Text.Read (readMaybe)
 import Data.List (intercalate)
+import Data.List.Split (chunksOf)
 import Bot.Msg.Splices
 
 
 -- | A user with a nickname, and maybe user\/host\/other things. This
--- is multipurpose, used just to indicate that some nick is a user 
+-- is multipurpose, used just to indicate that some nick is a user
 -- (when used with 'makeUser'), or, e.g., as a result from a NAMES or
 -- WHOIS request containing more info about the user.
 data User = User { nick :: String -- ^ Nick
                  , user :: Maybe String -- ^ User, if we know it.
                  , host :: Maybe String -- ^ Host, if we know it.
-                 , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op). 
+                 , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op).
                  } deriving (Eq, Read, Show, Ord)
 -- | Make a user struct from just a nick.
 makeUser :: String -> User
@@ -120,7 +121,7 @@ data SEvent
     | SJoin { from :: Sender, to :: Recipient }
     | SPart { from :: Sender, to :: Recipient }
     | SKick { from :: Sender, to :: Recipient, target :: String, reason :: String }
-    | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: String }
+    | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: [(Bool, Char, [String])] }
     | SNumeric { fromMaybe :: Maybe Sender, n :: Int, args :: [String] }
     | Startup
     | Connected
@@ -160,10 +161,10 @@ parseMsg = do src <- optionMaybe $ parseSender
                    "PONG"    -> $(makeNMsg 2) SPong args
                    "JOIN"    -> $(makeSTMsg 0) SJoin src args
                    "PART"    -> $(makeSTMsg 0) SPart src args
-                   "MODE"    -> $(makeSTMsg 1) SMode src args
                    "NOTICE"  -> $(makeSTMsg 1) SNotice src args
                    "PRIVMSG" -> $(makeSTMsg 1) SPrivmsg src args
                    "KICK"    -> $(makeSTMsg 2) SKick src args
+                   "MODE"    -> parseMode src args
                    _ -> case (readMaybe cmd :: Maybe Int) of
                             Just n -> return . SNumeric src n $ args
                             Nothing -> parserFail $ "Unexpected command " ++ cmd
@@ -208,3 +209,34 @@ parseArgs = do args <- many parseWord
                manyTill (oneOf "\r\n") eof
                return $ case lastArg of Just a  -> args ++ [a]
                                         Nothing -> args
+
+-- | Unwrap a parser parsing a mode change argument of the form @[+|-]{char}@.
+readModeChanges :: String -> Either ParseError (Bool, [Char])
+readModeChanges = parse ( do { ch <- oneOf "+-";
+                               rest <- many anyChar;
+                               return (ch == '+', rest) } ) ""
+
+readRecipient :: String -> Either ParseError Recipient
+readRecipient = parse parseRecipient ""
+
+-- | Parse a MODE message given the sender and arguments. The MODE message
+-- has fairly complex syntax unsuited for one of the common splices in 
+-- 'Bot.Msg.Splices'.
+parseMode :: Maybe Sender -> [String] -> Parser SEvent
+parseMode s a = case do
+    sender <- maybeToEither "No source for source/target message" s
+    recipient <- readRecipient (a!!0)
+    (ch, modes) <- readModeChanges (a!!1)
+    if (length a - 2) `mod` (length modes) /= 0
+      then fail $ "Wrong number of arguments to MODE message; "++show (length modes)
+                  ++" mode changes but "++show (length a - 2)++" mode arguments."
+      else let nargs = (length a - 2) `div` (length modes)
+               changes = zip3 (repeat ch) modes $ chunksOf nargs (drop 2 a ++ repeat [])
+           in return (sender, recipient, changes)
+  of
+  Left err -> parserFail . show $ err
+  Right (sender, recipient, changes) -> return $ SMode sender recipient changes
+
+
+maybeToEither e (Just x) = Right x
+maybeToEither e Nothing = fail e
