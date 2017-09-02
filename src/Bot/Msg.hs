@@ -120,6 +120,7 @@ data SEvent
     | SPrivmsg { from :: Sender, to :: Recipient, text :: String }
     | SJoin { from :: Sender, to :: Recipient }
     | SPart { from :: Sender, to :: Recipient }
+    | SQuit { from :: Sender, quitReason :: String }
     | SNick { from :: Sender, newNick :: String }
     | SKick { from :: Sender, to :: Recipient, target :: String, reason :: String }
     | SMode { from :: Sender, modeTarget :: Recipient, modeChanges :: [(Bool, Char, [String])] }
@@ -161,6 +162,7 @@ parseMsg = do src <- optionMaybe $ parseSender
                    "PING"    -> $(makeNMsg 1) SPing args
                    "PONG"    -> $(makeNMsg 2) SPong args
                    "NICK"    -> $(makeSMsg 1) SNick src args
+                   "QUIT"    -> $(makeSMsg 1) SQuit src args
                    "JOIN"    -> $(makeSTMsg 0) SJoin src args
                    "PART"    -> $(makeSTMsg 0) SPart src args
                    "NOTICE"  -> $(makeSTMsg 1) SNotice src args
