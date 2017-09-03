@@ -16,9 +16,11 @@ module Bot.Scripting.Core (
     respondToNAMES, respondToWHOISUSER, respondToWHOWASUSER,
     namesResponse, whoisResponse,
     -- * Nick management
-    acquiredNick, nickservIdent, identPassword, nickservAddr,
+    nickservAddr, acquiredNick, nickservIdent, identPassword, identSuccess,
+    requestOp,
     -- * Channel management
-    respondToJoin, respondToPart, respondToKick, unableToJoin, unableToJoinChan,
+    chanservAddr, respondToJoin, respondToPart, respondToKick, unableToJoin,
+    unableToJoinChan, opOnJoin,
     -- * Other
     respondToPing,
     ) where
@@ -40,11 +42,13 @@ callbacks = [ connected
             , respondToPong
 
             , acquiredNick
+            , identSuccess
 
             , respondToJoin
             , respondToPart
             , respondToKick
             , unableToJoin
+            , opOnJoin
 
             , respondToNAMES
             , respondToWHOISUSER
@@ -164,6 +168,21 @@ nickservIdent (SNotice sender@(SUser _ _ _) _ _) = do
         getGlobal handleNickservNotice >>= removeCallback
         sendMessage (fromS sender :: User) ("IDENTIFY "++nsPass)
 
+-- | When we successfully identify for our nick, we want to request
+-- op from ChanServ, in case any ops depended on being identified.
+identSuccess :: SEvent -> Bot ()
+identSuccess (SMode _ (RUser nick) [(True, 'r', [])]) = do
+    ownNick <- getGlobal' botNick
+    if nick /= ownNick then return ()
+    else requestOp
+
+-- | The address of the ChanServ service on the server.
+chanservAddr = CacheKey (SServer "") "SERVER" "chanserv"
+-- | Request op in all channels from ChanServ.
+requestOp = do
+    cs <- getGlobal' chanservAddr
+    case cs of ss@SUser{} -> sendMessage (fromS ss :: User) "OP"
+               _ -> return ()
 
 
 -- Channel management
@@ -215,6 +234,11 @@ unableToJoin (SNumeric _ n@473 (_:st:_)) = unableToJoinChan st n
 unableToJoin (SNumeric _ n@474 (_:st:_)) = unableToJoinChan st n
 unableToJoin (SNumeric _ n@475 (_:st:_)) = unableToJoinChan st n
 
+-- | Try to get op from ChanServ when we join a channel.
+opOnJoin (SJoin (SUser n _ _) ch@(RChannel _)) = do
+    ownNick <- getGlobal' botNick
+    if n /= ownNick then return ()
+    else requestOp
 
 
 
