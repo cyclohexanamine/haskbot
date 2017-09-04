@@ -11,14 +11,10 @@ module Main  (
     Flag(..), parseCmdArgs,
     ) where
 
-import Data.Ini as I (Ini, readIniFile, lookupValue)
-import Data.Text (pack, unpack)
-import Data.Either (lefts, rights)
-import Data.List.Split (splitOn)
 import System.Console.GetOpt (ArgOrder(..), OptDescr(..), ArgDescr(..), getOpt, usageInfo)
 import System.Environment (getArgs)
 
-import Bot (GlobalStore, GlobalKey(..), empty, runBot, configFile, setGlobalToStore)
+import Bot (empty, runBot, configFile, setGlobalToStore)
 import Bot.Run (startBot)
 
 -- | Command line flags
@@ -41,7 +37,7 @@ parseCmdArgs =  do
     args <- getArgs
     let (argL, _, errs) = getOpt Permute flags args
     let configs = [s | Config s <- argL]
-    if length errs /= 0 || Help `elem` argL || length configs == 0
+    if not (null errs) || Help `elem` argL || null configs
       then return . Left $ (concat errs ++ usageInfo header flags)
       else return . Right . head $ configs
   where header = "Usage: haskbot -c configfile [-h]"

@@ -18,13 +18,13 @@ module Bot.Scripting.Vote (
     showCurrVote, formatVote,
     ) where
 
-import Data.Maybe
-import Data.List
+import Data.Maybe (isJust, isNothing, fromJust)
+import Data.List (find, delete, intercalate)
 import Data.List.Split (splitOn)
-import Data.Time.Format
+import Data.Time.Format (formatTime, defaultTimeLocale)
 import Data.Time.Clock (UTCTime)
 import Text.ParserCombinators.Parsec
-import Text.ParserCombinators.Parsec.Number
+import Text.ParserCombinators.Parsec.Number (decimal)
 import Text.Parsec.Prim (parserFail)
 
 import Bot
@@ -49,7 +49,7 @@ data ActionSetting = ActionSetting { actAS :: String -- ^ The name of the action
 -- | Action settings for each action.
 actionSettings = PersistentKey [] "VOTE" "actionSettings" :: PersistentKey [ActionSetting]
 
-findAct act = getGlobal' actionSettings >>= return . find ((==act) . actAS)
+findAct act = find ((==act) . actAS) <$> getGlobal' actionSettings
 
 
 -- | Event hooks
@@ -89,13 +89,13 @@ onStartup Startup = do
 -- commands for this bot.
 processCommand :: SEvent -> Bot()
 processCommand ev@(SPrivmsg (SUser _ _ _) ch@(RChannel _) text)
-    | length text /= 0
+    | not (null text)
     = do vChan <- getGlobal' voteChan
          commandCh <- getGlobal' commandChar
-         if (fromR ch) /= vChan || head text /= commandCh then return ()
-         else case parse parseCommand "" . tail $ text of
-            Left err -> putLogWarning $ "Vote command parse failure: " ++ show err
-            Right act -> act ev
+         when (fromR ch == vChan && head text == commandCh) $
+           case parse parseCommand "" . tail $ text of
+             Left err -> putLogWarning $ "Vote command parse failure: " ++ show err
+             Right act -> act ev
     | otherwise = return ()
 
 
@@ -122,7 +122,7 @@ findTarget o@VoteOpt{targetO=targ} = do
           _ -> getWhowas (makeUser targ) $ \mbUser ->
             case mbUser of
               Just User{host=(Just h)} -> startVote $ o { hostO = Just h }
-              _ -> getGlobal' voteChan >>= \c -> do sendMessage c $ "Can't find target '" ++ targ ++ "'."
+              _ -> getGlobal' voteChan >>= \c -> sendMessage c $ "Can't find target '" ++ targ ++ "'."
     else getGlobal' voteChan >>= \c -> getNames c $ \namesL ->
         if targ `elem` [n | User{nick=n} <- namesL] then startVote o
                               else sendMessage c $ "Target '" ++ targ ++ "' not in channel."
@@ -143,7 +143,7 @@ startVote o = do
 
 
 -- | A yes\/no vote.
-data VoteChoice = VYes | VNo 
+data VoteChoice = VYes | VNo
     deriving (Eq, Read, Show)
 
 -- | !yes or !no - vote yes or no, checking the user's host to see if they've already
@@ -158,20 +158,20 @@ castVote choice (SPrivmsg u@(SUser nick _ host) ch _) = do
                                      VNo -> ("no", "yes")
     thisL <- getGlobal' $ fst choices
     otherL <- getGlobal' $ snd choices
-    isVote <- getGlobal' voteOpts >>= return . isJust
-    if (fromR ch) /= vChan || not isVote then sendMessage ch $ "No vote currently taking place."
-    else if host `elem` thisL then sendMessage ch $ "You've already voted "++(fst choiceNames)++
+    isVote <- isJust <$> getGlobal' voteOpts
+    if fromR ch /= vChan || not isVote then sendMessage ch "No vote currently taking place."
+    else if host `elem` thisL then sendMessage ch $ "You've already voted "++fst choiceNames++
                                                     ", "++nick++". Your vote is unaffected."
     else if host `elem` otherL then do
         setGlobal' (fst choices) $ thisL ++ [host]
         setGlobal' (snd choices) $ delete host otherL
         setGlobal' lastVote choice
-        sendMessage ch $ "You've already voted "++(snd choiceNames)++", "++nick++
-                         ". Your vote has been changed to "++(fst choiceNames)++"."
+        sendMessage ch $ "You've already voted "++snd choiceNames++", "++nick++
+                         ". Your vote has been changed to "++fst choiceNames++"."
     else do
         setGlobal' (fst choices) $ thisL ++ [host]
         setGlobal' lastVote choice
-        sendMessage ch $ "Your vote has been counted as "++(fst choiceNames)++", "++nick++"."
+        sendMessage ch $ "Your vote has been counted as "++fst choiceNames++", "++nick++"."
 
 
 -- | Send info about the current vote.
@@ -190,7 +190,7 @@ voteInfo (SPrivmsg u@(SUser nick _ host) c@(RChannel ch) _) = do
 
 
 -- | Gets info about the current vote, including end time.
-showCurrVote :: Bot (String)
+showCurrVote :: Bot String
 showCurrVote = do
     optsMb <- getGlobal' voteOpts
     case optsMb of
@@ -199,7 +199,7 @@ showCurrVote = do
             case x of Just t -> return $ formatTime defaultTimeLocale "%c" t
                       Nothing -> return ""
         return $ formatVote opts ++ "Ending " ++ endTime ++ ". "
-      Nothing -> return ("")
+      Nothing -> return ""
 
 -- | Pretty print a vote.
 formatVote :: VoteOpt -> String
@@ -215,14 +215,14 @@ voteEnd :: Bot ()
 voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
   Nothing -> return ()
   Just opts -> do
-    yesC <- getGlobal' yesHosts >>= return . fromIntegral . length
-    noC <- getGlobal' noHosts >>= return . fromIntegral . length
+    yesC <- fromIntegral . length <$> getGlobal' yesHosts
+    noC <- fromIntegral . length <$> getGlobal' noHosts
     lastV <- getGlobal' lastVote
     ch <- getGlobal' voteChan
     putLogInfo $ "Ending vote: " ++ show opts ++ "; Vote results: " ++show [yesC, noC] ++ ", " ++ show lastV
     let act = actionO opts
     setGlobal' voteOpts Nothing
-    if yesC + noC < (voteThresholdAS act)
+    if yesC + noC < voteThresholdAS act
     then sendMessage ch $ "Not enough votes were cast; needed "++show (voteThresholdAS act)++" for a "++
                           actAS act++" vote but got "++show (yesC + noC)++"."
     else if noC > yesC
@@ -232,7 +232,7 @@ voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
     then case lastV of
            VNo -> do sendMessage ch $ "Vote tied, and removing the last vote succeeds. "++formatVote opts
                      enactVote opts
-           VYes -> sendMessage ch $ "Vote tied, and removing the last vote fails. No action will be taken"
+           VYes -> sendMessage ch "Vote tied, and removing the last vote fails. No action will be taken"
     else do sendMessage ch $ "Vote successful. "++formatVote opts
             enactVote opts
 
@@ -245,7 +245,7 @@ enactVote opts = do
     let reasonStr = "Voted" ++ case reasonO opts of Just s -> ": " ++ s
                                                     Nothing -> "."
     getOwnStatus ch $ \resp ->
-        if isNothing resp || not ((fromJust resp) `elem` opchs)
+        if isNothing resp || (fromJust resp `notElem` opchs)
         then sendMessage ch "Need op privileges to carry out the action."
         else case actAS . actionO $ opts of
             "kick" -> kickUserFor ch (makeUser . targetO $ opts) reasonStr
@@ -257,15 +257,15 @@ enactVote opts = do
             "permaban" -> do mapM_ (banMask ch) targetMasks
                              kickUserFor ch (makeUser . targetO $ opts) reasonStr
             "unban" -> mapM_ (unbanMask ch) targetMasks
-  where targetMasks = [targetO opts++"!*@*"] ++ case hostO opts of Just h  -> ["*!*@"++h]
-                                                                   Nothing -> []
+  where targetMasks = (targetO opts++"!*@*") : case hostO opts of Just h  -> ["*!*@"++h]
+                                                                  Nothing -> []
 
 enactUnban :: Channel -> [String] -> Bot ()
 enactUnban ch targetMasks = do
     putLogInfo $ "Unbanning " ++ show targetMasks
     opchs <- getGlobal' statusOpChars
     getOwnStatus ch $ \resp ->
-        if isNothing resp || not ((fromJust resp) `elem` opchs)
+        if isNothing resp || (fromJust resp `notElem` opchs)
         then sendMessage ch $ "The following masks should be unbanned now, but I don't have op privileges: "++
                                intercalate ", " targetMasks
         else do mapM_ (unbanMask ch) targetMasks
@@ -276,13 +276,13 @@ enactUnban ch targetMasks = do
 voteHelp :: SEvent -> Bot ()
 voteHelp (SPrivmsg u@(SUser nick _ _) ch _) = do
     putLogDebug $ "Vote help request from " ++ show u
-    kickA <- findAct "kick" >>= return . fromJust
-    banA <- findAct "ban" >>= return . fromJust
-    permabanA <- findAct "permaban" >>= return . fromJust
-    unbanA <- findAct "unban" >>= return . fromJust
-    sendMessage (makeUser nick) $ "I am a democratic moderation bot. To start a vote, say !vote action target reason. The reason is optional, and can be more than one word as long as it does not contain hyphens. The options for action are 'kick', 'ban', 'permaban' and 'unban'. To manually specify the length of a ban, append -l length, where length is the length of the ban in hours. The default length is "++show((defaultLenAS banA)`div`3600)++" hours."
-    sendMessage (makeUser nick) $ "To vote yes, say !yes and to vote no, say !no. I will automatically get the host of the target given their exact nick, but I cannot do this for people who have not been on the server recently - a few hours."
-    sendMessage (makeUser nick) $ "The minimum number of votes is "++show(voteThresholdAS kickA)++" for a kick, "++show(voteThresholdAS banA)++" for bans, "++show(voteThresholdAS permabanA)++" for permabans, "++show(voteThresholdAS unbanA)++" for unbans; the duration of the vote in minutes is "++show((voteLenAS kickA)`div`60)++" for a kick, "++show((voteLenAS banA)`div`60)++" for bans, "++show((voteLenAS permabanA)`div`60)++" for permabans, "++show((voteLenAS unbanA)`div`60)++" for unbans. If there is a tie I will remove the last vote. To see information about the current vote, say '!voteinfo'."
+    kickA <- fromJust <$> findAct "kick"
+    banA <- fromJust <$> findAct "ban"
+    permabanA <- fromJust <$> findAct "permaban"
+    unbanA <- fromJust <$> findAct "unban"
+    sendMessage (makeUser nick) $ "I am a democratic moderation bot. To start a vote, say !vote action target reason. The reason is optional, and can be more than one word as long as it does not contain hyphens. The options for action are 'kick', 'ban', 'permaban' and 'unban'. To manually specify the length of a ban, append -l length, where length is the length of the ban in hours. The default length is "++show(defaultLenAS banA `div` 3600)++" hours."
+    sendMessage (makeUser nick) "To vote yes, say !yes and to vote no, say !no. I will automatically get the host of the target given their exact nick, but I cannot do this for people who have not been on the server recently - a few hours."
+    sendMessage (makeUser nick) $ "The minimum number of votes is "++show(voteThresholdAS kickA)++" for a kick, "++show(voteThresholdAS banA)++" for bans, "++show(voteThresholdAS permabanA)++" for permabans, "++show(voteThresholdAS unbanA)++" for unbans; the duration of the vote in minutes is "++show(voteLenAS kickA `div` 60)++" for a kick, "++show(voteLenAS banA `div` 60)++" for bans, "++show(voteLenAS permabanA `div` 60)++" for permabans, "++show(voteLenAS unbanA `div` 60)++" for unbans. If there is a tie I will remove the last vote. To see information about the current vote, say '!voteinfo'."
 
 
 -- Command parsing
@@ -308,11 +308,11 @@ parseVoteCmd :: Parser (Either String (String, String, Maybe Integer, Maybe Stri
 parseVoteCmd = do start <- parseUntil' " "
                   action <- optionMaybe $ parseUntil' " "
                   target <- optionMaybe $ parseUntil' " "
-                  reason <- optionMaybe $ parseUntil' "-" >>= return . rstrip
+                  reason <- optionMaybe $ rstrip <$> parseUntil' "-"
                   len <- optionMaybe $ do optionMaybe $ char '-'
                                           char 'l'
                                           optionMaybe $ char ' '
-                                          decimal >>= return . (*3600)
+                                          (*3600) <$> decimal
                   if start /= "!vote"
                   then parserFail $ "Parse fail in parseVoteCmd - " ++ start
                   else if isNothing action
@@ -324,7 +324,7 @@ parseVoteCmd = do start <- parseUntil' " "
 -- | Parse a !vote command, sending the appropriate error messages, and returning
 -- the vote options if the command was valid, or Nothing if not.
 validateVote :: Channel -> String -> Bot (Maybe VoteOpt)
-validateVote ch text = do
+validateVote ch text =
     case parse parseVoteCmd "" text of
         Left err -> putLogError ("Parse error in parseVoteCmd: " ++ show err) >> return Nothing
         Right (Left msg) -> sendMessage ch msg >> return Nothing

@@ -25,10 +25,8 @@ module Bot.Run (
 import Control.Concurrent (forkIO, threadDelay)
 import GHC.Conc (threadStatus, ThreadStatus(ThreadDied, ThreadFinished))
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
-import Control.DeepSeq (force)
 import Control.Exception (PatternMatchFail, SomeException, evaluate, try)
-import Control.Monad (liftM)
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Network (PortID(PortNumber), connectTo)
 import System.IO (Handle, BufferMode(LineBuffering), hSetBuffering, hGetLine, hClose)
@@ -48,8 +46,7 @@ import Bot.Scripting as S (callbacks)
 runTimers :: Bot ()
 runTimers = do runTimersList priorityTimerList
                status <- getGlobal readyStatus
-               if status then runTimersList timerList
-                         else return ()
+               when status $ runTimersList timerList
 
 -- | Check all the timers that are outstanding, and run all that have expired,
 -- from the timer list at the given key, updating it appropriately.
@@ -57,7 +54,7 @@ runTimersList :: GlobalKey [(CallbackHandle, UTCTime, Bot ())] -> Bot ()
 runTimersList tl = do
     currTime <- liftIO getCurrentTime
     expired <- consumeGlobal tl (\(h, t, c) -> t < currTime)
-    mapM_ runCallbackSafe . map (\(h, t, c)->c) $ expired
+    mapM_ (runCallbackSafe . \(h, t, c)->c) expired
 
 -- | Handle a line - message string - from the server, invoking the appropriate callbacks.
 handleLine :: String -> Bot ()
@@ -68,7 +65,7 @@ handleLine s = case readMsg s of
 -- | Apply all message callbacks in 'callbackList' which pattern-match the message.
 applyCallbacks :: SEvent -> Bot ()
 applyCallbacks msg = do callbacks <- getGlobal callbackList
-                        let applicable = catMaybes . map (flip tryApply $ msg) . map snd $ callbacks
+                        let applicable = mapMaybe (flip tryApply msg . snd) callbacks
                         mapM_ runCallbackSafe applicable
 
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,

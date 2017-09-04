@@ -53,13 +53,12 @@ module Bot.Bot (
     putLog, putLogAll, putLogDebug, putLogInfo, putLogWarning, putLogError, putLogCritical,
 
     -- * Re-exported for convenience
-    get, put, liftIO, rstrip,
+    get, put, liftIO, when, rstrip,
     ) where
 
 import Control.Concurrent (ThreadId)
-import Control.Monad (liftM)
 import Control.Monad.Trans (MonadIO, liftIO)
-import Control.Monad.State.Strict (MonadState, get, put)
+import Control.Monad.State.Strict (MonadState, get, put, when)
 import Control.Monad.Trans.State.Strict (StateT, runStateT)
 
 import Data.Char (isSpace)
@@ -74,7 +73,7 @@ import Data.UUID.V4 (nextRandom)
 import Text.Printf (hPrintf)
 import Text.Read (readMaybe)
 import Network (PortNumber)
-import System.IO (Handle, BufferMode(NoBuffering), hSetBuffering, hGetLine, hPrint)
+import System.IO (Handle)
 
 import Bot.Store
 import Bot.Msg
@@ -87,11 +86,11 @@ newtype Bot a = Bot {
 
 -- | Extract the IO computation by running the bot on the given initial state.
 runBot :: Bot a -> GlobalStore -> IO a
-runBot b = liftM fst . runStateT (getBot b)
+runBot b = fmap fst . runStateT (getBot b)
 
 -- | Modify the global state by running the computation on the initial state.
 changeBotState :: Bot a -> GlobalStore -> IO GlobalStore
-changeBotState b = liftM snd . runStateT (getBot b)
+changeBotState b = fmap snd . runStateT (getBot b)
 
 
 -- | Get the value at k in the state.
@@ -165,7 +164,7 @@ nilCH = CallbackHandle nil
 -- | Add the given function as a callback for events; return the handle.
 addCallback :: (SEvent -> Bot ()) -> Bot CallbackHandle
 addCallback cb = do callbacks <- getGlobal callbackList
-                    handle <- liftM CallbackHandle $ liftIO nextRandom
+                    handle <- CallbackHandle <$> liftIO nextRandom
                     setGlobal callbackList $ callbacks ++ [(handle, cb)]
                     return handle
 
@@ -180,7 +179,7 @@ removeCallback h = do callbacks <- getGlobal callbackList
 -- a handle. The computation won't be run until the bot is ready.
 addTimer :: UTCTime -> Bot () -> Bot CallbackHandle
 addTimer time cb = do timers <- getGlobal timerList
-                      handle <- liftM CallbackHandle $ liftIO nextRandom
+                      handle <- CallbackHandle <$> liftIO nextRandom
                       setGlobal timerList $ timers ++ [(handle, time, cb)]
                       return handle
 
@@ -287,11 +286,10 @@ toPersKey (CacheKey d s n) = PersistentKey d s n
 -- the typeclass restrictions are stronger than 'getGlobal'.
 getGlobal' :: (Eq a, Read a, Show a, Typeable a) => PersistentKey a -> Bot a
 getGlobal' (PersistentKey def sec nm) = do
-    if not $ sec `elem` ["BOT", "LOG", "SERVER"]
-      then do putLogAll $ sec++"."++nm
-              putLogAll . show $ def
-              putLogAll . showTypeSig $ def
-      else return ()
+    when (sec `notElem` ["BOT", "LOG", "SERVER"]) $
+      do putLogAll $ sec++"."++nm
+         putLogAll . show $ def
+         putLogAll . showTypeSig $ def
     cfg <- getGlobal configFile
     iniE <- liftIO $ I.readIniFile cfg
     case iniE >>= lookupValue (pack sec) (pack nm) of
@@ -301,7 +299,7 @@ getGlobal' (PersistentKey def sec nm) = do
                    Nothing -> error $ "Bad string in config file for "++sec
                                 ++"."++nm++" - couldn't read a value of type "
                                 ++showTypeSig def++" from string " ++show (unpack t)
-getGlobal' k@(CacheKey _ _ _) = do
+getGlobal' k@CacheKey{} = do
     st <- get
     let gk = toGlobalKey k
     if isInStore st gk
@@ -323,7 +321,7 @@ setGlobal' (PersistentKey def sec nm) v = do
         let newIni = I.Ini . M.insert (pack sec) newSec . I.unIni $ ini
         liftIO $ I.writeIniFile cfg newIni
       Left err -> error err
-setGlobal' k@(CacheKey _ _ _) v = do
+setGlobal' k@CacheKey{} v = do
     oldV <- getGlobal' k
     if oldV == v
       then return ()

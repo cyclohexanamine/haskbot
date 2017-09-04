@@ -48,10 +48,10 @@ listenNick (SNick (SUser nick _ host) newnick) = do
     putLogDebug $ "User " ++ nick ++ "@" ++ host ++ " nicked to " ++ newnick
     getWhois (makeUser newnick) resp
   where resp Nothing = return ()
-        resp (Just u@(User {statusCharL=ch})) = do
+        resp (Just u@User{statusCharL=ch}) = do
             putLogDebug $ "Whois returned: " ++ show u
             chans <- getGlobal' channels
-            let relevantChans = chans `intersect` (map fst ch)
+            let relevantChans = chans `intersect` map fst ch
             mapM_ (\ch -> handleNickEv ch newnick host) relevantChans
 
 -- | Listen for a join event, checking whether the channel is in our 'channels' list and
@@ -59,8 +59,7 @@ listenNick (SNick (SUser nick _ host) newnick) = do
 listenJoin (SJoin (SUser nick _ host) ch@(RChannel _)) = do
     putLogDebug $ "User " ++ nick ++ "@" ++ host ++ " joined " ++ show ch
     chans <- getGlobal' channels
-    if not $ (fromR ch) `elem` chans then return ()
-    else handleNickEv (fromR ch) nick host
+    when (fromR ch `elem` chans) $ handleNickEv (fromR ch) nick host
 
 -- | @handleNickEv ch newnick host@: Handle a nick event in the given channel 'ch'.
 -- The user with nick 'newnick' and host 'host' has changed nicks or joined the channel.
@@ -71,15 +70,14 @@ handleNickEv :: Channel -> String -> String -> Bot ()
 handleNickEv ch newnick host  = do
     forbid <- getGlobal' forbiddenChars
     exceptions <- getGlobal' exceptionsL
-    if newnick `intersect` forbid == [] || newnick `elem` exceptions then return ()
-    else do
-      graceN <- getGlobal' graceOffences
-      offences <- getGlobal' offendersL >>= return . lookupDefault host 0
-      modGlobal' offendersL . setAssoc host $ offences + 1
-      if offences < graceN then grace ch newnick
-      else punish ch newnick
-      putLogDebug $ "Nick event in " ++ show ch ++ ": " ++ newnick ++ " " ++ host
-      putLogDebug $ "Took action: " ++ show offences ++ " " ++ show graceN
+    when ((not . null $ newnick `intersect` forbid) && newnick `notElem` exceptions) $
+      do graceN <- getGlobal' graceOffences
+         offences <- lookupDefault host 0 <$> getGlobal' offendersL
+         modGlobal' offendersL . setAssoc host $ offences + 1
+         if offences < graceN then grace ch newnick
+         else punish ch newnick
+         putLogDebug $ "Nick event in " ++ show ch ++ ": " ++ newnick ++ " " ++ host
+         putLogDebug $ "Took action: " ++ show offences ++ " " ++ show graceN
 
 -- | Warn a user, and set a timer to kick them soon.
 grace :: Channel -> String -> Bot ()

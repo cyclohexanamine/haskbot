@@ -33,9 +33,8 @@ module Bot.Msg (
     ) where
 
 import Text.ParserCombinators.Parsec
+import Text.ParserCombinators.Parsec.Number (decimal)
 import Text.Parsec.Prim (parserFail)
-import Text.Read (readMaybe)
-import Data.List (intercalate)
 import Data.List.Split (chunksOf)
 import Bot.Msg.Splices
 
@@ -60,7 +59,7 @@ makeUserH s u h = User s (Just u) (Just h) []
 -- | A channel; the string doesn't include the '#' prefix.
 newtype Channel = Channel String deriving (Eq, Read, Show, Ord)
 -- | Take a channel name of the form "#chan" and create a 'Channel'.
-makeChannel (x:xs) = Channel xs
+makeChannel ('#':xs) = Channel xs
 -- | Turn a 'Channel' into a channel name of the form "#chan".
 channelToStr (Channel c) = "#"++c
 
@@ -144,10 +143,11 @@ data Recipient = RUser String | RChannel String
 -- | Convert a message to a string in the IRC format.
 joinMsg :: CMsg -> String
 joinMsg (CMsg cmd args) = show cmd ++ end ++ "\r\n"
-    where end = if length args > 1
-                  then " " ++ (intercalate " " . init $ args) ++ " :" ++ last args
-                  else if length args == 1 then " :" ++ last args
-                  else ""
+    where end
+            | length args  > 1 =
+              " " ++ (unwords . init $ args) ++ " :" ++ last args
+            | length args == 1 = " :" ++ last args
+            | otherwise = ""
 
 -- | Parse a message string in the IRC format.
 readMsg :: String -> Either ParseError SEvent
@@ -155,7 +155,7 @@ readMsg = parse parseMsg ""
 
 -- | The main parser for messages.
 parseMsg :: Parser SEvent
-parseMsg = do src <- optionMaybe $ parseSender
+parseMsg = do src <- optionMaybe parseSender
               cmd <- parseWord
               args <- parseArgs
               case cmd of
@@ -169,9 +169,9 @@ parseMsg = do src <- optionMaybe $ parseSender
                    "PRIVMSG" -> $(makeSTMsg 1) SPrivmsg src args
                    "KICK"    -> $(makeSTMsg 2) SKick src args
                    "MODE"    -> parseMode src args
-                   _ -> case (readMaybe cmd :: Maybe Int) of
-                            Just n -> return . SNumeric src n $ args
-                            Nothing -> parserFail $ "Unexpected command " ++ cmd
+                   _ -> case parse decimal "" cmd of
+                          Right n -> return . SNumeric src n $ args
+                          Left _ -> parserFail $ "Unexpected command " ++ cmd
 
 
 -- | Parse until one of the characters in @s@, or @eof@.
@@ -203,14 +203,14 @@ parseSender = char ':' >> (user <|> host)
                           char '@'
                           host <- parseWord
                           return $ SUser nick user host
-          host = parseWord >>= return . SServer
+          host = SServer <$> parseWord
 
 -- | Parse a recipient field, which might either be a channel in the form
 -- @#channel-name@, or a user in the form @nick@.
 parseRecipient :: Parser Recipient
 parseRecipient = channel <|> user
-    where channel = char '#' >> parseUntil "" >>= return . RChannel
-          user = parseUntil "" >>= return . RUser
+    where channel = RChannel <$> (char '#' >> parseUntil "")
+          user = RUser <$> parseUntil ""
 
 -- | Parse the arguments at the end of the message.
 parseArgs :: Parser [String]

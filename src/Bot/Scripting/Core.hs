@@ -26,7 +26,7 @@ module Bot.Scripting.Core (
     ) where
 import Bot
 
-import Control.Concurrent (forkIO, threadDelay, killThread)
+import Control.Concurrent (killThread)
 import Data.List (delete, (\\))
 import Data.List.Split (splitOn)
 
@@ -62,7 +62,7 @@ handle376 = GlobalKey nilCH "handle376" :: GlobalKey CallbackHandle
 
 -- | User registration, and set a callback to join channels.
 connected :: SEvent -> Bot ()
-connected (Connected) = do
+connected Connected = do
     putLogInfo "Connected to server."
     nick <- getGlobal' botNick
     writeMsg $ CMsg NICK [nick]
@@ -71,16 +71,16 @@ connected (Connected) = do
 
 -- | Remove all the channels from the current channel list.
 disconnected :: SEvent -> Bot ()
-disconnected (Disconnected) = do
+disconnected Disconnected = do
     putLogInfo "Disconnected from server."
     setGlobal currChanList []
     signalEvent UnReady
 
 -- | Keep track of ready\/unready status.
-manageReadyStatus (Ready) = do
+manageReadyStatus Ready = do
     putLogInfo "Now ready."
     setGlobal readyStatus True
-manageReadyStatus (UnReady) = do
+manageReadyStatus UnReady = do
     putLogInfo "Now unready."
     setGlobal readyStatus False
 
@@ -90,7 +90,7 @@ respondToEndOfMOTD :: SEvent -> Bot ()
 respondToEndOfMOTD (SNumeric _ 376 _) = do
     getGlobal handle376 >>= removeCallback
     chans <- getGlobal' autoJoinList
-    if length chans == 0 then return ()
+    if null chans then return ()
     else joinChannels chans
 
 -- | Respond to a server PING with PONG.
@@ -113,11 +113,11 @@ pingTimeoutLen = CacheKey 60 "BOT" "pingTimeoutLen" :: PersistentKey Integer
 -- reset the timer, so that it's only triggered if we don't receive a timely
 -- response.
 managePingTimer :: SEvent -> Bot ()
-managePingTimer (Connected) = do
+managePingTimer Connected = do
     tm <- getGlobal' pingTimeoutLen
     runInS tm pingTimeout >>= setGlobal pingTimeoutHandle
     runInS (div tm 3) pingTimer >>= setGlobal pingTimerHandle
-managePingTimer (Disconnected) = do
+managePingTimer Disconnected = do
     getGlobal pingTimerHandle >>= removeTimer
     getGlobal pingTimeoutHandle >>= removeTimer
 
@@ -173,8 +173,7 @@ nickservIdent (SNotice sender@(SUser _ _ _) _ _) = do
 identSuccess :: SEvent -> Bot ()
 identSuccess (SMode _ (RUser nick) [(True, 'r', [])]) = do
     ownNick <- getGlobal' botNick
-    if nick /= ownNick then return ()
-    else requestOp
+    when (nick == ownNick) requestOp
 
 -- | The address of the ChanServ service on the server.
 chanservAddr = CacheKey (SServer "") "SERVER" "chanserv"
@@ -196,9 +195,8 @@ respondToJoin (SJoin (SUser nick _ _) ch@(RChannel _)) = do
             putLogInfo ("Joined " ++ show ch)
             currChans <- getGlobal currChanList
             autojoin <- getGlobal' autoJoinList
-            if (fromR ch) `elem` autojoin && autojoin \\ currChans == []
-              then signalEvent Ready
-              else return ()
+            when (fromR ch `elem` autojoin && null (autojoin \\ currChans)) $
+               signalEvent Ready
 
 -- | If it's the bot that's parted, update the current channels list.
 respondToPart (SPart (SUser nick _ _) ch@(RChannel _)) = do
@@ -214,11 +212,9 @@ respondToKick e@(SKick (SUser nick _ _) ch@(RChannel _) target reason) = do
     ownNick <- getGlobal' botNick
     if target /= ownNick then return ()
     else do modGlobal currChanList (delete (fromR ch))
-            putLogInfo ("Kicked from "++(show ch)++" by " ++ nick ++ ": " ++ reason)
+            putLogInfo ("Kicked from " ++ show ch ++" by " ++ nick ++ ": " ++ reason)
             autojoin <- getGlobal' autoJoinList
-            if (fromR ch) `elem` autojoin
-              then signalEvent UnReady
-              else return ()
+            when (fromR ch `elem` autojoin) $ signalEvent UnReady
             runInSPriority 5 $ joinChannels [fromR ch]
 
 -- | If we're unable to join a channel, we want to record why, and then
@@ -237,8 +233,7 @@ unableToJoin (SNumeric _ n@475 (_:st:_)) = unableToJoinChan st n
 -- | Try to get op from ChanServ when we join a channel.
 opOnJoin (SJoin (SUser n _ _) ch@(RChannel _)) = do
     ownNick <- getGlobal' botNick
-    if n /= ownNick then return ()
-    else requestOp
+    when (n == ownNick) requestOp
 
 
 
@@ -246,7 +241,7 @@ opOnJoin (SJoin (SUser n _ _) ch@(RChannel _)) = do
 -- the requester will be called on 353 and unhooked; or if, e.g., the channel
 -- doesn't exist, the server will only send a 366 and the requester will be
 -- called on that.
-respondToNAMES (SNumeric _ 353 ([_,_,ch,names])) = do
+respondToNAMES (SNumeric _ 353 [_,_,ch,names]) = do
     chrs <- getGlobal' statusChars
     let toUser (x:xs) = if x `elem` chrs
                           then (makeUser xs){statusCharL=[(makeChannel ch, x)]}
@@ -278,7 +273,7 @@ respondToWHOISUSER (SNumeric _ 319 [_,n,chanL]) = do
     modGlobal whoisTempReplies $ map (\(n',u) -> if n'==n then (n', u {statusCharL=sCL}) else (n',u))
 respondToWHOISUSER (SNumeric _ 318 [_,n,_]) = do
     tr <- consumeGlobal whoisTempReplies ((n==).fst)
-    if length tr == 0 then whoisResponse n Nothing
+    if null tr then whoisResponse n Nothing
     else mapM_ (\(n,u) -> whoisResponse n (Just u)) tr
 
 -- | WHOWAS reply - like 'respondToNAMES', this handles both RPL_WHOWASUSER (314)

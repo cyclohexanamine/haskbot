@@ -2,7 +2,7 @@
 
 Flood control. There are four parameters: 'timeWindow', 'linesWeight',
 'charsWeight', 'joinWeight'. The bot will kick anyone who, in a single channel,
-posts enough messages within 'timeWindow' seconds such that @number-of-lines * 
+posts enough messages within 'timeWindow' seconds such that @number-of-lines *
 linesWeight + number-of-characters * charsWeight > 1@.
 
 e.g., if you want the bot to kick anyone who sends more then 6 lines in a
@@ -42,13 +42,13 @@ timeWindow = CacheKey 0 "FLOOD" "timeWindow" :: PersistentKey Int
 -- | Message history is stored per user per channel, in a 'Map' with
 -- keys @(Channel, User)@. The values are lists of @(time message was sent,
 -- (how many lines the message counts as, number of characters in message))@
--- for each message sent by that user to that channel and received by the 
+-- for each message sent by that user to that channel and received by the
 -- bot within 'timeWindow'; although these values are in general floats.
 type MessageMap = M.Map (Channel, User) [(UTCTime, (Float, Float))]
 messageMap = GlobalKey M.empty "messageMap" :: GlobalKey MessageMap
 
 -- | Main event hook. Captures various channel events and weights them
--- accordingly, passing them on to 'updateUserMessage'. 
+-- accordingly, passing them on to 'updateUserMessage'.
 trackMessage :: SEvent -> Bot ()
 trackMessage (SPrivmsg u@(SUser _ _ _) ch@(RChannel _) txt) =
     updateUserMessage (fromS u) (fromR ch) (1.0, fromIntegral . length $ txt)
@@ -62,12 +62,11 @@ updateUserMessage :: User -> Channel -> (Float, Float) -> Bot ()
 updateUserMessage u ch n = do
     let k = (ch, u)
     chans <- getGlobal' channels
-    if ch `elem` chans
-      then do cleanLines k
-              addLine k n
-              flooding <- isFlooding k
-              if flooding then stopFlooding k else return ()
-      else return ()
+    when (ch `elem` chans) $
+      do cleanLines k
+         addLine k n
+         flooding <- isFlooding k
+         when flooding $ stopFlooding k
 
 -- | Remove any logs outside the time window from the user's message history.
 cleanLines :: (Channel, User) -> Bot ()
@@ -93,13 +92,12 @@ isFlooding k = do
     cW <- getGlobal' charsWeight
     let ll = M.findWithDefault [] k m
         tupleAdd (a,b) (c,d) = (a+c, b+d)
-        (lines, chars) = foldl (tupleAdd) (0.0,0.0) . map snd $ ll 
+        (lines, chars) = foldl tupleAdd (0.0,0.0) . map snd $ ll
         score = lW * lines + cW * chars
     putLogAll $ "Flood score for " ++ show k ++ " - " ++ show score
-    if score > 1.0 then putLogDebug $"Flood detected: " ++ show [lW, cW] 
-                                     ++ show (lines, chars)
-                                     ++ " Message history: " ++ show m
-                   else return ()
+    when (score > 1.0) . putLogDebug $ "Flood detected: " ++ show [lW, cW]
+                                       ++ show (lines, chars)
+                                       ++ " Message history: " ++ show m
     return $ score > 1.0
 
 -- | Kick a user for flooding.

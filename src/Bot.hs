@@ -32,8 +32,8 @@ import Bot.Msg
 -- | Send a textual message to the recipient
 sendMessage :: RecipientC a => a -> String -> Bot ()
 sendMessage r t = writeMsg $ CMsg PRIVMSG [rs, t]
-    where rs = case (toR r) of RUser s -> s
-                               RChannel c -> "#" ++ c
+    where rs = case toR r of RUser s -> s
+                             RChannel c -> "#" ++ c
 
 -- | Join the list of channels, where each element is a channel name string (e.g.,
 -- @"#channame"@)
