@@ -326,7 +326,9 @@ parseVoteCmd = do start <- parseUntil' " "
 validateVote :: Channel -> String -> Bot (Maybe VoteOpt)
 validateVote ch text =
     case parse parseVoteCmd "" text of
-        Left err -> putLogError ("Parse error in parseVoteCmd: " ++ show err) >> return Nothing
+        Left err -> do putLogError ("Parse error in parseVoteCmd: " ++ show err)
+                       sendMessage ch "Couldn't parse !vote command. Try !votehelp."
+                       return Nothing
         Right (Left msg) -> sendMessage ch msg >> return Nothing
         Right (Right (act, targ, lenMb, reasonMb)) -> do
             actSettingMb <- findAct act
