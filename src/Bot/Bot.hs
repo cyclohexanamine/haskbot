@@ -25,7 +25,7 @@ share them across modules by exporting the keys.
 
 module Bot.Bot (
     -- * The Bot monad
-    Bot(..), runBot, changeBotState,
+    Bot(..), runBot, runSafe,
 
     -- * Global storage
     PersistentKey(..),
@@ -57,6 +57,7 @@ module Bot.Bot (
     ) where
 
 import Control.Concurrent (ThreadId)
+import Control.Exception (SomeException, try)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.State.Strict (MonadState, get, put, when)
 import Control.Monad.Trans.State.Strict (StateT, runStateT)
@@ -88,9 +89,18 @@ newtype Bot a = Bot {
 runBot :: Bot a -> GlobalStore -> IO a
 runBot b = fmap fst . runStateT (getBot b)
 
--- | Modify the global state by running the computation on the initial state.
-changeBotState :: Bot a -> GlobalStore -> IO GlobalStore
-changeBotState b = fmap snd . runStateT (getBot b)
+-- | Wrap a 'Bot' computation in an exception handler, running the second
+-- computation if the first fails.
+runSafe :: (SomeException -> Bot ()) -> Bot () -> Bot ()
+runSafe handler f = do
+    store <- get
+    stateOrErr <- liftIO (tryAll $ changeBotState f store)
+    case stateOrErr of
+      Left err -> handler err
+      Right st -> put st
+  where tryAll = try :: IO a -> IO (Either SomeException a)
+        changeBotState b = fmap snd . runStateT (getBot b)
+
 
 
 -- | Get the value at k in the state.
@@ -130,17 +140,21 @@ writeMsg msg = do let msgString = joinMsg msg
 putLog :: String -- ^ Log level (e.g., @"INFO"@, @"ERROR"@, etc.)
           -> String -- ^ Line
           -> Bot ()
-putLog lvl s = do logLvl <- getGlobal' logLevel
-                  case do { i <- elemIndex lvl logLevels; i' <- elemIndex logLvl logLevels;
-                            if i >= i' then return True else fail "" } of
-                    Nothing -> return ()
-                    Just _ -> do
-                      logFile <- getGlobal' logDest
-                      timestamp <- liftIO getCurrentTime
-                      let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
-                      liftIO . appendFile logFile $ logLine
-                      liftIO . putStrLn $ s
+putLog lvl s = runSafe errHandler $ do
+    logLvl <- getGlobal' logLevel
+    case do { i <- elemIndex lvl logLevels; i' <- elemIndex logLvl logLevels;
+              if i >= i' then return True else fail "" } of
+      Nothing -> return ()
+      Just _ -> do
+        logFile <- getGlobal' logDest
+        timestamp <- liftIO getCurrentTime
+        let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
+        liftIO . appendFile logFile $ logLine
+        liftIO . putStrLn $ s
   where logLevels = ["ALL", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        errHandler err = do liftIO . putStrLn $ "Error writing to log: " ++ show err
+                            liftIO . putStrLn $ s
+
 -- | Log with level ALL.
 putLogAll = putLog "ALL"
 -- | Log with level DEBUG.

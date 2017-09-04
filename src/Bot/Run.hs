@@ -25,7 +25,7 @@ module Bot.Run (
 import Control.Concurrent (forkIO, threadDelay)
 import GHC.Conc (threadStatus, ThreadStatus(ThreadDied, ThreadFinished))
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
-import Control.Exception (PatternMatchFail, SomeException, evaluate, try)
+import Control.Exception (PatternMatchFail, evaluate, try)
 import Data.Maybe (mapMaybe)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Network (PortID(PortNumber), connectTo)
@@ -71,20 +71,14 @@ applyCallbacks msg = do callbacks <- getGlobal callbackList
 -- | Try to apply @f@ to @v@ - if pattern matching on the argument fails,
 -- return @Nothing@. Otherwise return @Just (f v)@. Used to match callbacks.
 tryApply :: (a -> b) -> a -> Maybe b
-tryApply f v = case unsafePerformIO $ tryMatch ( evaluate (f v) ) of
+tryApply f v = case unsafePerformIO . tryMatch . evaluate $ f v of
                 Left err -> Nothing
                 Right r -> Just r
-               where tryMatch = try :: IO a -> IO (Either PatternMatchFail a)
+  where tryMatch = try :: IO a -> IO (Either PatternMatchFail a)
 
 -- | Run the given callback, handling any exceptions that occur.
 runCallbackSafe :: Bot () -> Bot ()
-runCallbackSafe cb = do
-    store <- get
-    stateOrErr <- liftIO (tryAll $ changeBotState cb store)
-    case stateOrErr of
-      Left err -> putLogError $ "Error in callback: " ++ show err
-      Right st -> put st
-   where tryAll = try :: IO a -> IO (Either SomeException a)
+runCallbackSafe = runSafe (\err -> putLogError $ "Error in callback: " ++ show err)
 
 -- | Invoke callbacks for all the stored signals, clearing the list.
 applySignals :: Bot ()
