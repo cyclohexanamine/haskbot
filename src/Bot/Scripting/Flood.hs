@@ -1,22 +1,23 @@
 {-| module: Bot.Scripting.Flood
 
-Flood control. There are three parameters: 'timeWindow', 'linesWeight',
-'charsWeight'. The bot will kick anyone who, in a single channel, posts enough
-messages within 'timeWindow' seconds such that @number-of-lines * linesWeight
- + number-of-characters * charsWeight > 1@.
+Flood control. There are four parameters: 'timeWindow', 'linesWeight',
+'charsWeight', 'joinWeight'. The bot will kick anyone who, in a single channel,
+posts enough messages within 'timeWindow' seconds such that @number-of-lines * 
+linesWeight + number-of-characters * charsWeight > 1@.
 
 e.g., if you want the bot to kick anyone who sends more then 6 lines in a
 5 second window, set @timeWindow = 5@, @linesWeight = 0.1667 (1\/6)@,
 @charsWeight = 0.0@.
 
 The bot will only do this in 'channels'. This also handles join flooding,
-by treating a join message as equivalent to 
-
+by treating a join message as equivalent to 'joinWeight' zero-character
+messages. e.g., if 'joinWeight' is @2@ in the above example, someone who joins
+more than three times in five seconds would be kicked.
 -}
 
 module Bot.Scripting.Flood (
     -- * Settings
-    channels, timeWindow, linesWeight, charsWeight,
+    channels, timeWindow, linesWeight, charsWeight, joinWeight,
     -- * Flood control
     MessageMap, trackMessage, cleanLines,
     addLine, isFlooding, stopFlooding,

@@ -16,7 +16,7 @@ received, we would define a callback function
 > echoCallback (SPrivmsg (SUser nick _ _) ch@(RChannel _) text) =
 >     writeMsg $ CMsg PRIVMSG [show ch, "Echoing: " ++ text]
 
-The Bot () monad allows callbacks to access IO functions (via @liftIO@) and
+The Bot monad allows callbacks to access IO functions (via @liftIO@) and
 a stateful store of global variables. Callbacks can simply use keys defined
 anywhere; 'Run' doesn't need to know about them, unlike the callbacks.
 -}
