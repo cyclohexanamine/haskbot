@@ -222,7 +222,9 @@ voteEnd = getGlobal' voteOpts >>= \optsMb -> case optsMb of
     putLogInfo $ "Ending vote: " ++ show opts ++ "; Vote results: " ++show [yesC, noC] ++ ", " ++ show lastV
     let act = actionO opts
     setGlobal' voteOpts Nothing
-    if yesC + noC < voteThresholdAS act
+    if yesC + noC == 0
+    then sendMessage ch "No votes were cast. No action will be taken."
+    else if yesC + noC < voteThresholdAS act
     then sendMessage ch $ "Not enough votes were cast; needed "++show (voteThresholdAS act)++" for a "++
                           actAS act++" vote but got "++show (yesC + noC)++"."
     else if noC > yesC
