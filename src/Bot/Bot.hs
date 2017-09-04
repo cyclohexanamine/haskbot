@@ -138,9 +138,9 @@ putLog lvl s = do logLvl <- getGlobal' logLevel
                     Just _ -> do
                       logFile <- getGlobal' logDest
                       timestamp <- liftIO getCurrentTime
-                      let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s
-                      liftIO . putStrLn $ s
+                      let logLine = lvl ++ " " ++ show timestamp ++ " -- " ++ s ++ "\n"
                       liftIO . appendFile logFile $ logLine
+                      liftIO . putStrLn $ s
   where logLevels = ["ALL", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 -- | Log with level ALL.
 putLogAll = putLog "ALL"
