@@ -38,16 +38,23 @@ import Text.Parsec.Prim (parserFail)
 import Data.List.Split (chunksOf)
 import Bot.Msg.Splices
 
+import Text.ParserCombinators.ReadPrec
+import Text.Read
+import GHC.Read
+
 
 -- | A user with a nickname, and maybe user\/host\/other things. This
 -- is multipurpose, used just to indicate that some nick is a user
 -- (when used with 'makeUser'), or, e.g., as a result from a NAMES or
 -- WHOIS request containing more info about the user.
+--
+-- This has a custom 'Read' instance, which includes both the instance
+-- GHC derives, mirroring the 'Show' instance, and one using 'makeUser'.
 data User = User { nick :: String -- ^ Nick
                  , user :: Maybe String -- ^ User, if we know it.
                  , host :: Maybe String -- ^ Host, if we know it.
                  , statusCharL :: [(Channel, Char)] -- ^ A list of status prefixes that the user has in each channel that we know (e.g., \@ for op). A space here means no status.
-                 } deriving (Eq, Read, Show, Ord)
+                 } deriving (Eq, Show, Ord)
 -- | Make a user struct from just a nick.
 makeUser :: String -> User
 makeUser s = User s Nothing Nothing []
@@ -251,3 +258,47 @@ parseMode s a = case do
 
 maybeToEither e (Just x) = Right x
 maybeToEither e Nothing = fail e
+
+
+
+-- Custom 'Read' instance for 'User', including 'makeUser' syntax.
+instance Read User where
+    readPrec = readUserDerived +++ readUserMake
+    readList = readListDefault
+    readListPrec = readListPrecDefault
+
+-- | Read a string of the form @makeUser "nick"@ into a 'User'.
+readUserMake
+  = parens
+      (prec
+         11
+         (do { expectP (Ident "makeUser");
+               u <- reset readPrec;
+               return (makeUser u) }))
+
+-- | GHC's derived 'Read' instance for 'User'.
+readUserDerived
+  = parens
+      (prec
+         11
+         (do { expectP (Ident "User");
+               expectP (Punc "{");
+               expectP (Ident "nick");
+               expectP (Punc "=");
+               a1_a8B1 <- reset readPrec;
+               expectP (Punc ",");
+               expectP (Ident "user");
+               expectP (Punc "=");
+               a2_a8B2 <- reset readPrec;
+               expectP (Punc ",");
+               expectP (Ident "host");
+               expectP (Punc "=");
+               a3_a8B3 <- reset readPrec;
+               expectP (Punc ",");
+               expectP (Ident "statusCharL");
+               expectP (Punc "=");
+               a4_a8B4 <- reset readPrec;
+               expectP (Punc "}");
+               return (User a1_a8B1 a2_a8B2 a3_a8B3 a4_a8B4) }))
+
+

@@ -13,18 +13,21 @@ The bot will only do this in 'channels'. This also handles join flooding,
 by treating a join message as equivalent to 'joinWeight' zero-character
 messages. e.g., if 'joinWeight' is @2@ in the above example, someone who joins
 more than three times in five seconds would be kicked.
+
+There's also an exemptions list, 'exemptionsList', containing nicks to exempt
+from flood control.
 -}
 
 module Bot.Scripting.Flood (
     -- * Settings
-    channels, timeWindow, linesWeight, charsWeight, joinWeight,
+    channels, timeWindow, linesWeight, charsWeight, joinWeight, exemptionsList,
     -- * Flood control
     MessageMap, trackMessage, cleanLines,
     addLine, isFlooding, stopFlooding,
     callbacks,
     ) where
 
-import qualified Data.Map.Lazy as M (Map, findWithDefault, adjust, alter, empty)
+import qualified Data.Map.Lazy as M (Map, findWithDefault, adjust, alter, insert, empty)
 import Data.Time.Clock (UTCTime, getCurrentTime, addUTCTime)
 
 import Bot
@@ -38,6 +41,7 @@ linesWeight = CacheKey 0.0 "FLOOD" "linesWeight" :: PersistentKey Float
 charsWeight = CacheKey 0.0 "FLOOD" "charsWeight" :: PersistentKey Float
 joinWeight = CacheKey 0.0 "FLOOD" "joinWeight" :: PersistentKey Float
 timeWindow = CacheKey 0 "FLOOD" "timeWindow" :: PersistentKey Int
+exemptionsList = PersistentKey [] "FLOOD" "exemptionsList" :: PersistentKey [User]
 
 -- | Message history is stored per user per channel, in a 'Map' with
 -- keys @(Channel, User)@. The values are lists of @(time message was sent,
@@ -98,10 +102,12 @@ isFlooding k = do
     when (score > 1.0) . putLogDebug $ "Flood detected: " ++ show [lW, cW]
                                        ++ show (lines, chars)
                                        ++ " Message history: " ++ show m
-    return $ score > 1.0
+    exempt <- elem (makeUser . nick . snd $ k) <$> getGlobal' exemptionsList
+    when exempt . putLogDebug $ "User " ++ show (snd k) ++ " exempt."
+    return $ score > 1.0 && not exempt
 
--- | Kick a user for flooding.
+-- | Kick a user for flooding, resetting their counter.
 stopFlooding :: (Channel, User) -> Bot ()
-stopFlooding (ch, u) = kickUserFor ch u "Flooding"
-
-
+stopFlooding k@(ch, u) = do
+    kickUserFor ch u "Flooding"
+    modGlobal messageMap (M.insert k [])
