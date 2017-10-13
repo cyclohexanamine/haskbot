@@ -104,6 +104,8 @@ isFlooding k = do
                                        ++ " Message history: " ++ show m
     exempt <- elem (makeUser . nick . snd $ k) <$> getGlobal' exemptionsList
     when exempt . putLogDebug $ "User " ++ show (snd k) ++ " exempt."
+    getGlobal' exemptionsList >>= \el -> putLogAll ("Exemptions list: " ++ show el)
+    putLogAll $ "makeUser: " ++ show (makeUser . nick . snd $ k)
     return $ score > 1.0 && not exempt
 
 -- | Kick a user for flooding, resetting their counter.
