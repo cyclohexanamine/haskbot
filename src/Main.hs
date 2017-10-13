@@ -9,10 +9,13 @@ module Main  (
     main,
     -- * Command line options
     Flag(..), parseCmdArgs,
+    -- * Other
+    makeSafe,
     ) where
 
 import System.Console.GetOpt (ArgOrder(..), OptDescr(..), ArgDescr(..), getOpt, usageInfo)
 import System.Environment (getArgs)
+import System.IO (hGetEncoding, hSetEncoding, mkTextEncoding, stdin, stdout, stderr)
 
 import Bot (empty, runBot, configFile, setGlobalToStore)
 import Bot.Run (startBot)
@@ -42,10 +45,20 @@ parseCmdArgs =  do
       else return . Right . head $ configs
   where header = "Usage: haskbot -c configfile [-h]"
 
+-- | Set handles to transliterate Unicode characters instead of writing them out
+-- to console and potentially causing an error.
+makeSafe h = do
+  ce' <- hGetEncoding h
+  case ce' of
+    Nothing -> return ()
+    Just ce -> mkTextEncoding ((takeWhile (/= '/') $ show ce) ++ "//TRANSLIT") >>=
+      hSetEncoding h
+
 -- | Get the command line arguments, initialise the bot state with the location
 -- of the config file, and start the bot.
 main :: IO ()
 main = do
+    mapM_ makeSafe [stdout, stdin, stderr]
     parsed <- parseCmdArgs
     case parsed of
       Left err -> putStrLn err
